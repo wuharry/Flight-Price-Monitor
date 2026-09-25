@@ -1,0 +1,38 @@
+{
+  "origin": "TPE",
+  "destination": "NRT",
+  "departureDate": "2027-02-10",
+  "returnDate": "2027-02-16",
+  "adults": 2,
+  "currency": "TWD",
+  "provider": "tigerair",
+  "outboundPrice": 14798,
+  "inboundPrice": 12798,
+  "taxAndFees": 5518,
+  "totalPrice": 33114,
+  "checkedAt": "2026-09-25T04:40:00.532Z",
+  "bookingUrl": "https://booking.tigerairtw.com/?adult=2&children=0&infant=0&currencyCode=TWD&languageCode=zh-tw&type=roundTrip&outbound=TPE-NRT&departureDate=2027-02-10&inbound=NRT-TPE&returnDate=2027-02-16",
+  "priceBasis": "tigerLight-including-tax-excluding-payment-and-extras-v1",
+  "legs": [
+    {
+      "origin": "TPE",
+      "destination": "NRT",
+      "departureTime": "2027-02-10 13:30:00",
+      "arrivalTime": "2027-02-10 17:30:00",
+      "flightNumber": "IT202",
+      "fare": 14798,
+      "tax": 2400,
+      "total": 17198
+    },
+    {
+      "origin": "NRT",
+      "destination": "TPE",
+      "departureTime": "2027-02-16 11:25:00",
+      "arrivalTime": "2027-02-16 14:45:00",
+      "flightNumber": "IT201",
+      "fare": 12798,
+      "tax": 3118,
+      "total": 15916
+    }
+  ]
+}

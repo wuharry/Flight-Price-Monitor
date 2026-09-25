@@ -1,0 +1,287 @@
+{
+  "data": {
+    "appFlightSearchResult": {
+      "flightType": "roundTrip",
+      "journeys": [
+        {
+          "legs": [
+            {
+              "origin": "TPE",
+              "destination": "NRT",
+              "departureDate": "2027-02-10",
+              "availabilityLegs": [
+                {
+                  "origin": "TPE",
+                  "destination": "NRT",
+                  "availabilitySegments": [
+                    {
+                      "origin": "TPE",
+                      "destination": "NRT",
+                      "departureTime": "2027-02-10 06:10:00",
+                      "arrivalTime": "2027-02-10 10:35:00",
+                      "carrierCode": "IT",
+                      "flightNumber": "200"
+                    }
+                  ],
+                  "fares": [
+                    {
+                      "sellable": true,
+                      "availableCount": 28,
+                      "productClass": "tigerLight",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1200,
+                            "discountedTotalAmountWithoutTax": 8399,
+                            "discountedTotalAmount": 9599
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "sellable": true,
+                      "availableCount": 28,
+                      "productClass": "tigerSmart",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1200,
+                            "discountedTotalAmountWithoutTax": 9349,
+                            "discountedTotalAmount": 10549
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "sellable": true,
+                      "availableCount": 28,
+                      "productClass": "tigerPro",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1200,
+                            "discountedTotalAmountWithoutTax": 9999,
+                            "discountedTotalAmount": 11199
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "origin": "TPE",
+                  "destination": "NRT",
+                  "availabilitySegments": [
+                    {
+                      "origin": "TPE",
+                      "destination": "NRT",
+                      "departureTime": "2027-02-10 13:30:00",
+                      "arrivalTime": "2027-02-10 17:30:00",
+                      "carrierCode": "IT",
+                      "flightNumber": "202"
+                    }
+                  ],
+                  "fares": [
+                    {
+                      "sellable": true,
+                      "availableCount": 14,
+                      "productClass": "tigerLight",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1200,
+                            "discountedTotalAmountWithoutTax": 7399,
+                            "discountedTotalAmount": 8599
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "sellable": true,
+                      "availableCount": 14,
+                      "productClass": "tigerSmart",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1200,
+                            "discountedTotalAmountWithoutTax": 8349,
+                            "discountedTotalAmount": 9549
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "sellable": true,
+                      "availableCount": 14,
+                      "productClass": "tigerPro",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1200,
+                            "discountedTotalAmountWithoutTax": 8999,
+                            "discountedTotalAmount": 10199
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "legs": [
+            {
+              "origin": "NRT",
+              "destination": "TPE",
+              "departureDate": "2027-02-16",
+              "availabilityLegs": [
+                {
+                  "origin": "NRT",
+                  "destination": "TPE",
+                  "availabilitySegments": [
+                    {
+                      "origin": "NRT",
+                      "destination": "TPE",
+                      "departureTime": "2027-02-16 11:25:00",
+                      "arrivalTime": "2027-02-16 14:45:00",
+                      "carrierCode": "IT",
+                      "flightNumber": "201"
+                    }
+                  ],
+                  "fares": [
+                    {
+                      "sellable": true,
+                      "availableCount": 15,
+                      "productClass": "tigerLight",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1559,
+                            "discountedTotalAmountWithoutTax": 6399,
+                            "discountedTotalAmount": 7958
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "sellable": true,
+                      "availableCount": 15,
+                      "productClass": "tigerSmart",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1559,
+                            "discountedTotalAmountWithoutTax": 7349,
+                            "discountedTotalAmount": 8908
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "sellable": true,
+                      "availableCount": 15,
+                      "productClass": "tigerPro",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1559,
+                            "discountedTotalAmountWithoutTax": 7999,
+                            "discountedTotalAmount": 9558
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "origin": "NRT",
+                  "destination": "TPE",
+                  "availabilitySegments": [
+                    {
+                      "origin": "NRT",
+                      "destination": "TPE",
+                      "departureTime": "2027-02-16 20:25:00",
+                      "arrivalTime": "2027-02-16 23:25:00",
+                      "carrierCode": "IT",
+                      "flightNumber": "203"
+                    }
+                  ],
+                  "fares": [
+                    {
+                      "sellable": true,
+                      "availableCount": 12,
+                      "productClass": "tigerLight",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1559,
+                            "discountedTotalAmountWithoutTax": 7399,
+                            "discountedTotalAmount": 8958
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "sellable": true,
+                      "availableCount": 12,
+                      "productClass": "tigerSmart",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1559,
+                            "discountedTotalAmountWithoutTax": 8349,
+                            "discountedTotalAmount": 9908
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "sellable": true,
+                      "availableCount": 12,
+                      "productClass": "tigerPro",
+                      "paxFares": [
+                        {
+                          "paxType": "ADT",
+                          "ticketPrice": {
+                            "userCurrency": "TWD",
+                            "taxAmount": 1559,
+                            "discountedTotalAmountWithoutTax": 8999,
+                            "discountedTotalAmount": 10558
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

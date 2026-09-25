@@ -1,0 +1,39 @@
+name: Flight monitor
+on:
+  workflow_dispatch:
+  schedule:
+    # UTC; avoid the busiest top-of-hour minute.
+    - cron: '17 */3 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: flight-monitor
+  cancel-in-progress: false
+jobs:
+  monitor:
+    if: vars.MONITOR_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      STORAGE: supabase
+      EMAIL_MODE: ${{ vars.EMAIL_MODE || 'preview' }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      NOTIFICATION_FROM_EMAIL: ${{ vars.NOTIFICATION_FROM_EMAIL }}
+      NOTIFICATION_TO_EMAIL: ${{ secrets.NOTIFICATION_TO_EMAIL }}
+      BROWSER_HEADLESS: 'false'
+      BROWSER_CHANNEL: chromium
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.23.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: xvfb-run -a pnpm monitor

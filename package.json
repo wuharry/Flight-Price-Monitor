@@ -1,0 +1,40 @@
+{
+  "name": "flight-price-monitor",
+  "version": "1.0.0",
+  "description": "Lightweight and extensible flight price monitor starting with Tigerair Taiwan",
+  "main": "dist/src/index.js",
+  "packageManager": "pnpm@10.23.0",
+  "engines": { "node": ">=22" },
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/src/index.js",
+    "monitor": "node dist/src/index.js --run-once",
+    "test": "pnpm build && node --test dist/tests/*.test.js",
+    "test:browser": "tsx scripts/test-browser.ts",
+    "check-types": "tsc --noEmit",
+    "inspect:tigerair": "tsx scripts/inspect-tigerair.ts",
+    "build": "tsc"
+  },
+  "keywords": [
+    "flight-monitor",
+    "tigerair",
+    "price-tracker",
+    "supabase",
+    "resend"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "dotenv": "^16.4.7",
+    "playwright": "1.63.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@electric-sql/pglite": "^0.3.14",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

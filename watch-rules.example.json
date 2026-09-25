@@ -1,0 +1,18 @@
+[
+  {
+    "id": "tpe-nrt-20270210",
+    "provider": "tigerair",
+    "origin": "TPE",
+    "destination": "NRT",
+    "departureDate": "2027-02-10",
+    "returnDate": "2027-02-16",
+    "adults": 1,
+    "currency": "TWD",
+    "targetPrice": 6500,
+    "notifyNewLow": true,
+    "newLowDays": 30,
+    "dropAmount": 1000,
+    "dropPercent": 15,
+    "enabled": true
+  }
+]
