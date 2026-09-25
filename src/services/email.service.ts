@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import type { AlertRecord } from '../types/index.js';
+import { sendGmail, type GmailFactory } from './gmail.js';
 export interface NotificationSender { send(alert: AlertRecord): Promise<'sent' | 'preview'> }
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -23,7 +24,7 @@ export function renderEmail(alert: AlertRecord) {
 }
 export class EmailService implements NotificationSender {
   constructor(private options = config, private request: typeof fetch = fetch,
-    private recipient?: (alert: AlertRecord) => Promise<string>) {}
+    private recipient?: (alert: AlertRecord) => Promise<string>, private gmailFactory?: GmailFactory) {}
   async send(alert: AlertRecord): Promise<'sent' | 'preview'> {
     const message = renderEmail(alert);
     if (this.options.EMAIL_MODE === 'preview') {
@@ -32,6 +33,11 @@ export class EmailService implements NotificationSender {
     }
     const to = alert.payload.rule.userId ? await this.recipient?.(alert) : this.options.NOTIFICATION_TO_EMAIL;
     if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('No verified recipient for this monitoring rule');
+    if (this.options.EMAIL_PROVIDER === 'gmail') {
+      await sendGmail(this.options.GMAIL_USER, this.options.GMAIL_APP_PASSWORD, to, message, alert.id, this.gmailFactory);
+      console.log('[Email] Gmail accepted alert ' + alert.id);
+      return 'sent';
+    }
     const response = await this.request('https://api.resend.com/emails', {
       method: 'POST', signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${this.options.RESEND_API_KEY}`, 'Content-Type': 'application/json',

@@ -16,6 +16,7 @@ WORKDIR /app
 ENV NODE_ENV=production STORAGE=supabase EMAIL_MODE=preview BROWSER_HEADLESS=false
 COPY --from=build --chown=pwuser:pwuser /app/node_modules ./node_modules
 COPY --from=build --chown=pwuser:pwuser /app/dist/src ./dist/src
+COPY --from=build --chown=pwuser:pwuser /app/dist/scripts/test-gmail.js ./dist/scripts/test-gmail.js
 COPY --chown=pwuser:pwuser package.json ./
 COPY --chown=pwuser:pwuser scripts/container-start.sh scripts/container-smoke.mjs ./scripts/
 # Windows checkouts may use CRLF; the Linux entry script must use LF.

@@ -32,12 +32,14 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
     "dotenv": "^16.4.7",
+    "nodemailer": "^10.0.10",
     "playwright": "1.63.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.14",
     "@types/node": "^22.13.10",
+    "@types/nodemailer": "^8.0.2",
     "esbuild": "^0.28.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
