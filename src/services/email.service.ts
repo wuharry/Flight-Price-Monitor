@@ -22,18 +22,21 @@ export function renderEmail(alert: AlertRecord) {
   return { subject, text, html: `<div style="font:16px/1.7 sans-serif;max-width:620px;margin:auto"><h2>${escapeHtml(subject)}</h2><p style="white-space:pre-line">${escapeHtml(text)}</p><a href="${escapeHtml(result.bookingUrl)}">前往航空公司查詢</a></div>` };
 }
 export class EmailService implements NotificationSender {
-  constructor(private options = config, private request: typeof fetch = fetch) {}
+  constructor(private options = config, private request: typeof fetch = fetch,
+    private recipient?: (alert: AlertRecord) => Promise<string>) {}
   async send(alert: AlertRecord): Promise<'sent' | 'preview'> {
     const message = renderEmail(alert);
     if (this.options.EMAIL_MODE === 'preview') {
       console.log('[Email preview — not sent]\n' + message.subject + '\n' + message.text);
       return 'preview';
     }
+    const to = alert.payload.rule.userId ? await this.recipient?.(alert) : this.options.NOTIFICATION_TO_EMAIL;
+    if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('No verified recipient for this monitoring rule');
     const response = await this.request('https://api.resend.com/emails', {
       method: 'POST', signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${this.options.RESEND_API_KEY}`, 'Content-Type': 'application/json',
         'Idempotency-Key': `flight-alert/${alert.id}` },
-      body: JSON.stringify({ from: this.options.NOTIFICATION_FROM_EMAIL, to: [this.options.NOTIFICATION_TO_EMAIL], ...message }),
+      body: JSON.stringify({ from: this.options.NOTIFICATION_FROM_EMAIL, to: [to], ...message }),
     });
     const body = await response.json() as { id?: string; message?: string; error?: unknown };
     if (!response.ok || body.error || !body.id) throw new Error(`Resend delivery failed (HTTP ${response.status})`);

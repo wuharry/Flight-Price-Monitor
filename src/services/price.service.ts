@@ -15,6 +15,7 @@ export class PriceService {
     rule = watchRuleSchema.parse(rule);
     const provider = this.providers.get(rule.provider);
     if (!provider) throw new Error('Unknown provider: ' + rule.provider);
+    console.log(`[Progress] Rule ${rule.id}: querying ${rule.origin}-${rule.destination}`);
     const result = await provider.search(rule);
     const key = searchKey(rule);
     if (searchKey(result) !== key || !Number.isFinite(result.totalPrice) || result.totalPrice <= 0) throw new Error('Provider returned mismatched or invalid quote');
@@ -48,13 +49,15 @@ export class PriceService {
           console.warn(`[Alert expired] ${alert.id}: too old, disabled, or search conditions changed`);
           continue;
         }
-        if (await this.email.send(alert) === 'sent') await this.repository.markAlert(alert.id, 'sent');
+        // Resolve recipient from the current rule, never stale ownership in an outbox payload.
+        if (await this.email.send({ ...alert, payload: { ...alert.payload, rule } }) === 'sent') await this.repository.markAlert(alert.id, 'sent');
       } catch (error) { failed++; console.error('[Alert failed]', (error as Error).message); }
     }
     return failed;
   }
   async runAllActiveRules() {
     const owner = randomUUID();
+    console.log('[Progress] Acquiring monitor lock');
     if (!await this.repository.acquireLock(owner)) throw new Error('Another monitor is running (or a stale local lock exists)');
     // Must end before the database lock's 20-minute lease can expire.
     const deadline = setTimeout(() => {
@@ -64,7 +67,9 @@ export class PriceService {
     deadline.unref();
     const summary = { checked: 0, skipped: 0, failed: 0 };
     try {
+      console.log('[Progress] Lock acquired; reading enabled rules');
       const rules = await this.repository.getActiveRules();
+      console.log(`[Progress] Loaded ${rules.length} enabled rules`);
       if (!rules.length) console.log('[Monitor] No enabled watch rules');
       summary.failed += await this.flushAlerts(rules);
       for (const rule of rules) {

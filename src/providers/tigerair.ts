@@ -23,12 +23,14 @@ export class TigerairProvider implements FlightProvider {
     if (input.departureDate < todayTaipei()) throw new Error('Departure date is in the past');
     const timeout = this.options.timeoutMs ?? config.BROWSER_TIMEOUT_MS;
     const channel = this.options.channel ?? config.BROWSER_CHANNEL;
+    console.log('[Browser] Launching browser');
     const browser = await chromium.launch({
       headless: this.options.headless ?? config.BROWSER_HEADLESS === 'true',
       channel: channel === 'chromium' ? undefined : channel,
       timeout,
     });
     let page: Page | undefined;
+    console.log('[Browser] Browser launched');
     let quoteFound = false;
     try {
       const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
@@ -44,6 +46,7 @@ export class TigerairProvider implements FlightProvider {
       const [response] = await Promise.all([
         responsePromise,
         (async () => {
+          console.log('[Browser] Opening booking page');
           const navigation = await page!.goto(getBookingUrl(input), { waitUntil: 'domcontentloaded', timeout });
           if (navigation && !navigation.ok()) throw new Error(`Tigerair booking page rejected the request (HTTP ${navigation.status()}). No price recorded.`);
           const text = await page!.locator('body').innerText({ timeout: 5000 });

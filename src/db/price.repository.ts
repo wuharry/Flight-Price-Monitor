@@ -17,7 +17,7 @@ export class PriceRepository implements MonitorRepository {
     const { data, error } = await this.client.from('watch_rules').select('*').eq('enabled', true).order('id');
     if (error) throw new Error('Read watch rules: ' + error.message);
     return (data ?? []).map(row => watchRuleSchema.parse({
-      id: row.id, provider: row.provider, origin: row.origin, destination: row.destination,
+      id: row.id, userId: row.user_id ?? undefined, provider: row.provider, origin: row.origin, destination: row.destination,
       departureDate: row.departure_date, returnDate: row.return_date ?? undefined, adults: row.adults,
       currency: row.currency, targetPrice: row.target_price == null ? undefined : Number(row.target_price),
       notifyNewLow: row.notify_new_low, newLowDays: row.new_low_days,

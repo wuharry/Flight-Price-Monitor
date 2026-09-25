@@ -17,7 +17,7 @@ const envSchema = z.object({
   BROWSER_TIMEOUT_MS: z.coerce.number().int().min(5000).max(120000).default(90000),
 });
 export function parseConfig(env: NodeJS.ProcessEnv) {
-  const value = envSchema.parse(env);
+  const value = envSchema.parse({ ...env, SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SECRET_KEY });
   if (value.STORAGE === 'supabase') {
     z.string().url().parse(value.SUPABASE_URL);
     if (!value.SUPABASE_SERVICE_ROLE_KEY) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required');

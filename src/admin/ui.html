@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flight Monitor 管理中心</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#172d43;background:#eef3f8}*{box-sizing:border-box}body{margin:0}header{padding:30px max(24px,calc((100vw - 1100px)/2));background:#132e46;color:white}header p{color:#c3d6e6}main{max-width:1100px;margin:auto;padding:24px}h1{margin:0}h2{font-size:22px}section{background:white;border:1px solid #d6e1eb;border-radius:16px;padding:24px;margin-bottom:24px}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}label{display:block;font-weight:600;font-size:14px}input,select,textarea{display:block;width:100%;border:1px solid #9aacbd;border-radius:7px;padding:11px;margin-top:7px;font:inherit;background:white;color:#172d43}input[type=checkbox]{display:inline;width:auto}button{padding:11px 18px;background:#146d80;color:white;border:0;border-radius:7px;font:inherit;cursor:pointer;margin:14px 8px 0 0}button.secondary{background:#e7eef5;color:#203c54}button:disabled{opacity:.5}small,.hint{color:#536b7f;line-height:1.7}#status{position:sticky;top:8px;z-index:2;padding:14px;border-radius:8px;background:#e5f3ed;white-space:pre-wrap}#status:empty{display:none}#status.error{background:#ffe9e7;color:#8a211b}textarea{min-height:230px;font-family:monospace;font-size:12px}.rule{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:15px 0;border-bottom:1px solid #e4eaf0}.rule button{margin:0}.badge{font-size:12px;background:#e7eef5;padding:4px 8px;border-radius:9px}a{color:#126b83}@media(max-width:650px){.grid{grid-template-columns:1fr}main{padding:12px}section{padding:18px}.rule{align-items:flex-start;flex-direction:column}}
+</style>
+<header><h1>Flight Monitor</h1><p>部署設定與航班監控管理 · 僅在這台電腦開啟</p></header>
+<main><p id="status" role="status" aria-live="polite"></p>
+<section><h2>1. 部署設定精靈</h2><p class="hint">先填入服務資訊並儲存。金鑰留空會保留原值，已儲存的金鑰不會顯示。</p>
+<form id="settings"><div class="grid">
+<label>Google Cloud 專案 ID<input name="PROJECT_ID" required placeholder="gen-lang-client-0118434625"></label>
+<label>Google Cloud 區域<input name="REGION" required value="asia-east1"></label>
+<label>監控規則儲存位置<select name="STORAGE"><option value="supabase">Supabase（雲端監控）</option><option value="local">本機 JSON（本機測試）</option></select></label>
+<label>Supabase API URL<input name="SUPABASE_URL" type="url" required placeholder="https://你的專案.supabase.co"></label>
+<label>Supabase Secret / service_role key<input name="SUPABASE_SERVICE_ROLE_KEY" type="password" autocomplete="new-password"><small id="supabase-state"></small></label>
+<label>Resend API key<input name="RESEND_API_KEY" type="password" autocomplete="new-password"><small id="resend-state"></small></label>
+<label>寄件人<input name="NOTIFICATION_FROM_EMAIL" required value="Flight Monitor <onboarding@resend.dev>"></label>
+<label>收件 Email<input name="NOTIFICATION_TO_EMAIL" type="email" required></label>
+<label>本機通知模式<select name="EMAIL_MODE"><option value="preview">預覽（不寄信）</option><option value="send">正式寄信</option></select></label>
+</div><button>儲存設定到本機</button></form>
+<p class="hint">儲存只更新這台電腦的 .env。已部署的 Cloud Run 不會自動更新。測試寄件人 onboarding@resend.dev 只能寄到你的 Resend 帳號信箱。</p>
+<details><summary>產生 Cloud Shell 部署指令</summary>
+<p class="hint">適用於已建置 monitor:v1、建立服務帳戶及資料表的專案。先在 Secret Manager 更新三筆密鑰，再執行產生的指令。雲端部署固定先用 preview 測試。</p>
+<p><a id="secret-link" target="_blank" rel="noreferrer">開啟 Secret Manager</a></p>
+<ul><li>flight-monitor-supabase-key：Supabase key</li><li>flight-monitor-resend-key：Resend key</li><li>flight-monitor-recipient：收件 Email</li></ul>
+<button type="button" id="generate">產生部署指令</button><button type="button" id="copy" class="secondary">複製指令</button>
+<label>Cloud Shell 指令（不含金鑰）<textarea id="commands" readonly></textarea></label></details></section>
+<section><h2>2. 監控規則</h2><p id="storage-label" class="hint">請先儲存設定，再讀取規則。</p><button id="reload" class="secondary">讀取規則／測試資料庫連線</button><div id="rules"></div>
+<h3 id="rule-title">新增監控</h3><form id="rule"><input name="id" type="hidden"><div class="grid">
+<label>出發機場代碼<input name="origin" required pattern="[A-Z]{3}" maxlength="3" value="TPE"></label>
+<label>抵達機場代碼<input name="destination" required pattern="[A-Z]{3}" maxlength="3" value="NRT"></label>
+<label>出發日期<input name="departureDate" type="date" required></label>
+<label>回程日期（留空為單程）<input name="returnDate" type="date"></label>
+<label>成人人數<input name="adults" type="number" min="1" max="9" value="1" required></label>
+<label>目標總價 TWD（全部成人含稅）<input name="targetPrice" type="number" min="0" step="0.01"></label>
+<label>新低比較天數<input name="newLowDays" type="number" min="1" max="365" value="30" required></label>
+<label>降價金額門檻（選填）<input name="dropAmount" type="number" min="0.01" step="0.01"></label>
+<label>降價百分比門檻（選填）<input name="dropPercent" type="number" min="0.01" max="100" step="0.01"></label>
+<label><input name="notifyNewLow" type="checkbox" checked> 歷史新低通知</label>
+<label><input name="enabled" type="checkbox" checked> 啟用這條監控</label>
+</div><button>儲存監控規則</button><button type="button" id="reset-rule" class="secondary">清空／新增另一條</button></form>
+<p class="hint">Supabase 模式會直接更新雲端規則，下一次 Job 執行生效。不會立即查價或寄信。票價不含付款手續費及加購項目。</p></section></main>
+<script>
+const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);
+const $=s=>document.querySelector(s),settings=$('#settings'),ruleForm=$('#rule');
+let saved=null;
+function status(message,error=false){$('#status').textContent=message;$('#status').className=error?'error':'';}
+async function api(path,body){const r=await fetch('/api/'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined});const v=await r.json();if(!r.ok)throw Error(v.error);return v;}
+function fields(form){return Object.fromEntries(new FormData(form));}
+async function loadSettings(){const s=await api('settings');saved=s.values;for(const [k,v]of Object.entries(s.values))if(v&&settings.elements.namedItem(k))settings.elements.namedItem(k).value=v;$('#supabase-state').textContent=s.secrets.supabase?'已儲存，留空保留':'尚未設定';$('#resend-state').textContent=s.secrets.resend?'已儲存，留空保留':'尚未設定';$('#secret-link').href='https://console.cloud.google.com/security/secret-manager?project='+encodeURIComponent(s.values.PROJECT_ID||'');}
+settings.onsubmit=async e=>{e.preventDefault();const b=settings.querySelector('button');b.disabled=true;try{const r=await api('settings',fields(settings));settings.elements.SUPABASE_SERVICE_ROLE_KEY.value='';settings.elements.RESEND_API_KEY.value='';await loadSettings();$('#commands').value='';status(r.message);}catch(e){status(e.message,true)}finally{b.disabled=false}};
+async function loadRules(){const data=await api('rules');$('#storage-label').textContent=data.storage==='supabase'?'目前操作：Supabase 雲端資料庫（最多顯示 500 條）':'目前操作：本機 JSON，雲端 Job 不會讀取此檔案';$('#rules').replaceChildren();if(!data.rules.length)$('#rules').textContent='尚未建立監控規則。';for(const r of data.rules){const row=document.createElement('div');row.className='rule';const info=document.createElement('span');info.textContent=`${r.origin} → ${r.destination} · ${r.departureDate}${r.returnDate?' ～ '+r.returnDate:' 單程'} · ${r.adults} 人 · ${r.enabled?'啟用':'停用'}`;const edit=document.createElement('button');edit.type='button';edit.textContent='編輯';edit.onclick=()=>{ruleForm.reset();for(const [k,v]of Object.entries(r)){const input=ruleForm.elements.namedItem(k);if(input){if(input.type==='checkbox')input.checked=!!v;else input.value=v??'';}}$('#rule-title').textContent='編輯監控';ruleForm.scrollIntoView({behavior:'smooth'});};row.append(info,edit);$('#rules').append(row);}}
+$('#reload').onclick=async()=>{try{await loadRules();status('規則讀取成功。')}catch(e){status(e.message,true)}};
+$('#reset-rule').onclick=()=>{ruleForm.reset();ruleForm.elements.id.value='';$('#rule-title').textContent='新增監控'};
+ruleForm.onsubmit=async e=>{e.preventDefault();const b=ruleForm.querySelector('button');b.disabled=true;try{const data=fields(ruleForm);for(const k of ['adults','targetPrice','newLowDays','dropAmount','dropPercent']){if(data[k]==='')delete data[k];else data[k]=Number(data[k]);}if(!data.returnDate)delete data.returnDate;data.enabled=ruleForm.elements.enabled.checked;data.notifyNewLow=ruleForm.elements.notifyNewLow.checked;const r=await api('rules',data);ruleForm.elements.id.value=r.id;$('#rule-title').textContent='編輯監控';await loadRules();status(r.message);}catch(e){status(e.message,true)}finally{b.disabled=false}};
+const quote=v=>"'"+String(v).replaceAll("'","'\\''")+"'";
+$('#generate').onclick=()=>{if(!saved?.PROJECT_ID){status('請先儲存部署設定。',true);return;}const v=saved;const image=v.REGION+'-docker.pkg.dev/'+v.PROJECT_ID+'/flight-monitor/monitor:v1';const account='flight-monitor@'+v.PROJECT_ID+'.iam.gserviceaccount.com';const common=' --project='+quote(v.PROJECT_ID)+' --region='+quote(v.REGION);const env='^|^STORAGE=supabase|EMAIL_MODE=preview|SUPABASE_URL='+v.SUPABASE_URL+'|NOTIFICATION_FROM_EMAIL='+v.NOTIFICATION_FROM_EMAIL+'|BROWSER_CHANNEL=chromium|BROWSER_HEADLESS=false';if(env.split('|').length!==7){status('寄件人不能包含 | 字元',true);return;}const commands=['# 在 Cloud Shell 執行；先確認三筆 Secret 的最新版本已啟用。',...['supabase-key','resend-key','recipient'].map(s=>'gcloud secrets add-iam-policy-binding flight-monitor-'+s+' --project='+quote(v.PROJECT_ID)+' --member='+quote('serviceAccount:'+account)+' --role=roles/secretmanager.secretAccessor'),'gcloud run jobs deploy flight-monitor'+common+' --image='+quote(image)+' --service-account='+quote(account)+' --tasks=1 --parallelism=1 --cpu=1 --memory=1Gi --task-timeout=900s --max-retries=0 --set-env-vars='+quote(env)+' --set-secrets='+quote('SUPABASE_SERVICE_ROLE_KEY=flight-monitor-supabase-key:latest,RESEND_API_KEY=flight-monitor-resend-key:latest,NOTIFICATION_TO_EMAIL=flight-monitor-recipient:latest'),'# 部署成功後執行以下指令；若已有 Job 在執行，請先等它結束。','gcloud run jobs execute flight-monitor'+common+' --wait','gcloud run jobs logs read flight-monitor'+common+' --limit=100'];$('#commands').value=commands.join('\n\n');status('已依儲存的設定產生指令，不含金鑰。');};
+$('#copy').onclick=async()=>{try{if(!$('#commands').value)throw Error('請先產生指令');await navigator.clipboard.writeText($('#commands').value);status('已複製指令');}catch(e){status(e.message,true)}};
+loadSettings().catch(e=>status(e.message,true));
+</script></html>

@@ -4,9 +4,13 @@
   "description": "Lightweight and extensible flight price monitor starting with Tigerair Taiwan",
   "main": "dist/src/index.js",
   "packageManager": "pnpm@10.23.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
+    "build:web": "node scripts/build-web.mjs",
+    "admin": "tsx src/admin/server.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/src/index.js",
     "monitor": "node dist/src/index.js --run-once",
@@ -14,7 +18,7 @@
     "test:browser": "tsx scripts/test-browser.ts",
     "check-types": "tsc --noEmit",
     "inspect:tigerair": "tsx scripts/inspect-tigerair.ts",
-    "build": "tsc"
+    "build": "tsc && node scripts/copy-admin.mjs"
   },
   "keywords": [
     "flight-monitor",
@@ -32,8 +36,9 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/node": "^22.13.10",
     "@electric-sql/pglite": "^0.3.14",
+    "@types/node": "^22.13.10",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }

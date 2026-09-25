@@ -1,0 +1,50 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { PGlite } from '@electric-sql/pglite';
+
+test('multi-user RLS blocks cross-user CRUD, history, alerts, forged owners and worker RPCs', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
+      create schema auth; create table auth.users(id uuid primary key, email text, email_confirmed_at timestamptz);
+      create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
+      grant usage on schema auth to authenticated; grant execute on function auth.uid() to authenticated;`);
+    await db.exec(await readFile('src/db/schema.sql', 'utf8'));
+    const migration = await readFile('src/db/multi-user.sql', 'utf8');
+    await db.exec(migration); await db.exec(migration);
+    const alice = randomUUID(), bob = randomUUID();
+    await db.query('insert into auth.users values ($1,$2,now()),($3,$4,null)', [alice, 'alice@example.com', bob, 'bob@example.com']);
+    const asUser = async (id: string) => { await db.exec('reset role'); await db.query("select set_config('request.jwt.claim.sub',$1,false)", [id]); await db.exec('set role authenticated'); };
+    const insert = async (owner: string) => db.query<{id: string}>("insert into watch_rules(user_id,origin,destination,departure_date) values ($1,'TPE','NRT',current_date+30) returning id", [owner]);
+    await asUser(alice);
+    const a = (await insert(alice)).rows[0].id;
+    await assert.rejects(insert(bob), /row-level security/);
+    await assert.rejects(db.query('update watch_rules set user_id=$1 where id=$2', [bob,a]), /permission denied/);
+    await assert.rejects(db.query('select acquire_monitor_lock($1)', [randomUUID()]), /permission denied/);
+    await assert.rejects(db.query('select monitor_recipient($1,$2)', [a,alice]), /permission denied/);
+    await assert.rejects(db.query("update watch_rules set adults=0 where id=$1", [a]), /Invalid monitoring/);
+    for (let i = 0; i < 9; i++) await insert(alice);
+    await assert.rejects(insert(alice), /at most 10/);
+    await asUser(bob);
+    const b = (await insert(bob)).rows[0].id;
+    assert.equal((await db.query('select * from watch_rules')).rows.length, 1);
+    assert.equal((await db.query('update watch_rules set enabled=false where id=$1 returning id', [a])).rows.length, 0);
+    assert.equal((await db.query('delete from watch_rules where id=$1 returning id', [a])).rows.length, 0);
+    await db.exec('reset role');
+    await db.query('insert into price_history(watch_rule_id,price) values ($1,5000),($2,6000)', [a,b]);
+    await db.query("insert into alerts(watch_rule_id,price,type) values ($1,5000,'below_target'),($2,6000,'below_target')", [a,b]);
+    await asUser(bob);
+    assert.equal((await db.query('select * from price_history')).rows.length, 1);
+    assert.equal((await db.query('select id from alerts')).rows.length, 1);
+    await assert.rejects(db.query('select payload from alerts'), /permission denied/);
+    await assert.rejects(db.query('insert into price_history(watch_rule_id,price) values ($1,1)', [b]), /permission denied/);
+    await db.exec('reset role; set role service_role');
+    assert.equal((await db.query<{email:string}>('select monitor_recipient($1,$2) email', [a,alice])).rows[0].email, 'alice@example.com');
+    assert.equal((await db.query<{email:null}>('select monitor_recipient($1,$2) email', [b,bob])).rows[0].email, null);
+    assert.equal((await db.query<{email:null}>('select monitor_recipient($1,$2) email', [a,bob])).rows[0].email, null);
+    await db.exec('reset role; set role anon');
+    await assert.rejects(db.query('select * from watch_rules'), /permission denied/);
+  } finally { await db.close(); }
+});

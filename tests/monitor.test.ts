@@ -125,7 +125,7 @@ test('Resend returned error fails; retry uses stable idempotency key', async () 
     keys.push((init!.headers as Record<string, string>)['Idempotency-Key']);
     return new Response(JSON.stringify({ message: 'rejected' }), { status: 422 });
   };
-  const service = new EmailService({ ...config, EMAIL_MODE: 'send' }, request);
+  const service = new EmailService({ ...config, EMAIL_MODE: 'send', NOTIFICATION_TO_EMAIL: 'operator@example.com' }, request);
   await assert.rejects(service.send(item), /422/);
   await assert.rejects(service.send(item), /422/);
   assert.equal(keys[0], keys[1]);
@@ -137,4 +137,19 @@ test('email preview is not sent; template escapes HTML and includes pricing excl
   const email = renderEmail(item);
   assert.ok(!email.html.includes('<script>'));
   assert.ok(email.text.includes('付款手續費'));
+});
+
+test('owned alerts only go to resolved owner and never fall back to operator email', async () => {
+  const item = alert();
+  item.payload.rule = { ...item.payload.rule, userId: randomUUID() };
+  let recipient = '';
+  const request: typeof fetch = async (_url, init) => {
+    recipient = JSON.parse(String(init?.body)).to[0];
+    return new Response(JSON.stringify({ id: 'test' }));
+  };
+  const options = { ...config, EMAIL_MODE: 'send' as const, NOTIFICATION_TO_EMAIL: 'operator@example.com' };
+  await assert.rejects(new EmailService(options, request).send(item), /No verified recipient/);
+  assert.equal(recipient, '');
+  await new EmailService(options, request, async () => 'owner@example.com').send(item);
+  assert.equal(recipient, 'owner@example.com');
 });

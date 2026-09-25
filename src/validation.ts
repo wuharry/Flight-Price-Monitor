@@ -19,6 +19,7 @@ function validRoute(value: FlightSearch) {
 }
 export const searchSchema = z.object(fields).refine(validRoute, 'Invalid route or return date');
 export const watchRuleSchema = z.object({
+  userId: z.string().uuid().optional(),
   ...fields,
   id: z.string().min(1),
   provider: z.string().regex(/^[a-z][a-z0-9_-]*$/).default('tigerair'),

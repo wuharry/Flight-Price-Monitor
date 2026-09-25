@@ -29,6 +29,7 @@ export interface FlightPriceResult extends FlightSearch {
 }
 export type AlertType = 'below_target' | 'new_low' | 'drop_amount' | 'drop_percent';
 export interface WatchRule extends FlightSearch {
+  userId?: string;
   id: string;
   provider: string;
   targetPrice?: number;

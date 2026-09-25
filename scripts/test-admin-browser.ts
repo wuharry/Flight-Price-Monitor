@@ -1,0 +1,50 @@
+import { chromium } from 'playwright';
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import assert from 'node:assert/strict';
+import { startAdmin } from '../src/admin/server.js';
+
+const root = await mkdtemp(join(tmpdir(), 'flight-ui-'));
+const { server, url } = await startAdmin(root, 0);
+const browser = await chromium.launch({ channel: 'msedge', headless: true });
+try {
+  const page = await browser.newPage({ viewport: { width: 1280, height: 950 } });
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(url);
+  await page.locator('#supabase-state').filter({ hasText: '尚未設定' }).waitFor();
+  await page.locator('[name=PROJECT_ID]').fill('flight-test-123');
+  await page.locator('[name=STORAGE]').selectOption('local');
+  await page.locator('[name=SUPABASE_URL]').fill('https://testproject.supabase.co');
+  await page.locator('[name=SUPABASE_SERVICE_ROLE_KEY]').fill('browser-test-secret');
+  await page.locator('[name=RESEND_API_KEY]').fill('browser-test-resend');
+  await page.locator('[name=NOTIFICATION_TO_EMAIL]').fill('test@example.com');
+  await page.getByRole('button', { name: '儲存設定到本機', exact: true }).click();
+  await page.locator('#status').filter({ hasText: '已儲存到本機' }).waitFor();
+  assert.equal(await page.locator('[name=SUPABASE_SERVICE_ROLE_KEY]').inputValue(), '');
+  await page.locator('summary').click();
+  await page.getByRole('button', { name: '產生部署指令', exact: true }).click();
+  const commands = await page.locator('#commands').inputValue();
+  assert.match(commands, /gcloud run jobs deploy/);
+  assert.ok(!commands.includes('browser-test-secret'));
+  await page.locator('[name=departureDate]').fill('2027-02-10');
+  await page.locator('[name=targetPrice]').fill('6500');
+  await page.getByRole('button', { name: '儲存監控規則', exact: true }).click();
+  await page.locator('#rules .rule').waitFor();
+  await page.getByRole('button', { name: '編輯', exact: true }).click();
+  await page.locator('[name=enabled]').uncheck();
+  await page.getByRole('button', { name: '儲存監控規則', exact: true }).click();
+  await page.locator('#rules .rule').filter({ hasText: '停用' }).waitFor();
+  await mkdir('artifacts/admin', { recursive: true });
+  await page.screenshot({ path: 'artifacts/admin/desktop.png', fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.evaluate('document.documentElement.scrollWidth <= innerWidth'));
+  await page.screenshot({ path: 'artifacts/admin/mobile.png', fullPage: true });
+  assert.deepEqual(errors, []);
+  console.log('PASS: browser settings, secret masking, deployment script, create/edit/disable rule, mobile layout; no JS errors.');
+} finally {
+  await browser.close();
+  await new Promise<void>(r => server.close(() => r()));
+  await rm(root, { recursive: true, force: true });
+}

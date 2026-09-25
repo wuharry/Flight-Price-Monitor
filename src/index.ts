@@ -5,14 +5,21 @@ import { PriceRepository } from './db/price.repository.js';
 import { EmailService } from './services/email.service.js';
 import { PriceService } from './services/price.service.js';
 import { TigerairProvider } from './providers/tigerair.js';
+import { getSupabaseClient } from './db/supabase.js';
 
 async function main() {
+  console.log('[Startup] Node monitor started', JSON.stringify({ storage: config.STORAGE, emailMode: config.EMAIL_MODE, browser: config.BROWSER_CHANNEL }));
   const flags = new Set(process.argv.slice(2));
   for (const flag of flags) if (!['--run-once', '--once'].includes(flag)) throw new Error('Unknown argument: ' + flag);
   const once = flags.has('--run-once') || flags.has('--once');
   const repository = config.STORAGE === 'supabase' ? new PriceRepository() :
     new LocalRepository(config.DATA_DIR, config.WATCH_RULES_FILE);
-  const service = new PriceService(repository, new EmailService(), [new TigerairProvider()], config.EMAIL_MODE === 'send');
+  const email = new EmailService(config, fetch, async alert => {
+    const { data, error } = await getSupabaseClient().rpc('monitor_recipient', { p_rule: alert.watchRuleId, p_owner: alert.payload.rule.userId });
+    if (error || typeof data !== 'string') throw new Error('Cannot resolve verified rule owner email');
+    return data;
+  });
+  const service = new PriceService(repository, email, [new TigerairProvider()], config.EMAIL_MODE === 'send');
   const stop = new AbortController();
   const signal = () => stop.abort();
   process.once('SIGINT', signal);
