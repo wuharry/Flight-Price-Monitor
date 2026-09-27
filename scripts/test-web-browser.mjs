@@ -32,14 +32,38 @@ try {
  await page.locator('#login-email').fill(user.email);await page.locator('#login-password').fill('test-password-only');await page.locator('#login').click();
  await page.locator('#dashboard').waitFor({state:'visible'});
  await page.locator('[name=departure_date]').fill('2027-02-10');await page.locator('[name=target_price]').fill('6500');
+ await page.getByRole('button',{name:'儲存監控',exact:true}).click();
+ assert.equal(rules.length,0,'Round trips require a return date');
+ await page.locator('.duration-chip-btn[data-days="4"]').click();
+ assert.equal(await page.locator('[name=return_date]').inputValue(),'2027-02-14');
+ await page.locator('#btn-trip-oneway').click();
+ assert.equal(await page.locator('[name=return_date]').inputValue(),'');
+ assert.equal(await page.locator('[name=return_date]').evaluate(el=>el.required),false);
+ await page.locator('#btn-trip-round').click();
+ await page.locator('.duration-chip-btn[data-days="4"]').click();
+ await page.locator('[name=adults]').fill('2');
  await page.getByRole('button',{name:'儲存監控',exact:true}).click();await page.locator('.watch').waitFor();
  assert.equal(rules[0].user_id,user.id);
+ const booking=new URL(await page.locator('.airline-link-btn').getAttribute('href'));
+ assert.equal(booking.searchParams.get('returnDate'),'2027-02-14');
+ assert.equal(booking.searchParams.get('adult'),'2');
+ assert.equal(booking.searchParams.get('outbound'),'TPE-NRT');
+ await page.locator('[name=departure_date]').fill('2027-12-01');
+ await page.locator('[name=departure_date]').blur();
+ await page.getByRole('button',{name:'編輯',exact:true}).click();
+ assert.equal(await page.locator('[name=return_date]').getAttribute('min'),'2027-02-10','Editing must replace stale date limits');
  await page.getByRole('button',{name:'停用',exact:true}).click();await page.getByRole('button',{name:'啟用',exact:true}).waitFor();
  assert.equal(rules[0].enabled,false);
+ assert.equal(await page.locator('[name=enabled]').isChecked(),false,'Card toggle must update the edited form');
+ await Promise.all([
+  page.waitForResponse(res=>res.request().method()==='GET' && res.url().includes('/price_history')),
+  page.getByRole('button',{name:'儲存監控',exact:true}).click(),
+ ]);
+ assert.equal(rules[0].enabled,false,'Saving must preserve paused state');
  await page.screenshot({path:'artifacts/website/dashboard.png',fullPage:true});
  await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate('document.documentElement.scrollWidth <= innerWidth'));
  await page.screenshot({path:'artifacts/website/mobile.png',fullPage:true});
  await page.locator('#logout').click();await page.locator('#auth').waitFor({state:'visible'});
  assert.equal(await page.locator('.watch').count(),0);assert.deepEqual(errors,[]);
- console.log('PASS: login, create owned rule, pause rule, empty history, logout clears data, mobile layout. Supabase HTTP mocked; database isolation tested separately.');
+ console.log('PASS: login, required return date, trip toggles, duration shortcuts, booking parameters, owned rule, edit date limits, pause/save consistency, empty history, logout, mobile layout. Supabase HTTP mocked; no live email sent.');
 } finally {await browser.close();await new Promise(r=>server.close(r));}
