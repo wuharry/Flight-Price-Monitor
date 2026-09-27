@@ -16,6 +16,7 @@
     "monitor": "node dist/src/index.js --run-once",
     "test": "pnpm build && node --test dist/tests/*.test.js",
     "test:browser": "tsx scripts/test-browser.ts",
+    "test:user-flow": "node scripts/test-user-flow.mjs",
     "check-types": "tsc --noEmit",
     "inspect:tigerair": "tsx scripts/inspect-tigerair.ts",
     "build": "tsc && node scripts/copy-admin.mjs"
