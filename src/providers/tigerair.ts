@@ -5,7 +5,7 @@ import type { FlightProvider } from './base.js';
 import { searchSchema, todayTaipei } from '../validation.js';
 import { parseTigerairResponse } from './tigerair-parser.js';
 import { getBookingUrl } from './tigerair-url.js';
-import { isFareEndpoint, pageSignal } from './tigerair-diagnostics.js';
+import { isFareEndpoint, pageSignal, networkSummary } from './tigerair-diagnostics.js';
 
 export interface BrowserOptions {
   channel?: string;
@@ -37,6 +37,9 @@ export class TigerairProvider implements FlightProvider {
       navigationStatus: null as number | null, fareRequests: 0,
       fareStatuses: [] as number[], failedRequests: 0, pageErrors: 0,
       phase: 'navigation', signal: 'unknown',
+      networkFailures: [] as ReturnType<typeof networkSummary>[],
+      httpErrors: [] as ReturnType<typeof networkSummary>[],
+      pageHost: '', bodyCharacters: 0,
     };
     try {
       const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
@@ -47,8 +50,16 @@ export class TigerairProvider implements FlightProvider {
       });
       page.on('response', response => {
         if (isFareEndpoint(response.url()) && diagnostic.fareStatuses.length < 20) diagnostic.fareStatuses.push(response.status());
+        if (response.status() >= 400 && diagnostic.httpErrors.length < 20) {
+          diagnostic.httpErrors.push(networkSummary(response.url(), response.request().resourceType(), undefined, response.status()));
+        }
       });
-      page.on('requestfailed', () => { diagnostic.failedRequests++; });
+      page.on('requestfailed', request => {
+        diagnostic.failedRequests++;
+        if (diagnostic.networkFailures.length < 20) {
+          diagnostic.networkFailures.push(networkSummary(request.url(), request.resourceType(), request.failure()?.errorText ?? 'unknown'));
+        }
+      });
       page.on('pageerror', () => { diagnostic.pageErrors++; });
       // Subscribe before navigation. Read the public site's own GraphQL response;
       // tokens stay in the isolated browser and are never persisted or replayed.
@@ -82,6 +93,8 @@ export class TigerairProvider implements FlightProvider {
       if (!quoteFound) {
         const text = page ? await page.locator('body').innerText({ timeout: 2000 }).catch(() => '') : '';
         diagnostic.signal = pageSignal(text);
+        diagnostic.bodyCharacters = text.length;
+        diagnostic.pageHost = page ? networkSummary(page.url(), 'document').host : '';
         console.error('[Browser diagnostic]', JSON.stringify(diagnostic));
       }
       if (page) await this.options.onError?.(page, error as Error).catch(() => undefined);

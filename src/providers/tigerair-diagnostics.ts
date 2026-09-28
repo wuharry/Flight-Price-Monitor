@@ -1,4 +1,14 @@
 // Never log request bodies, query strings, cookies, tokens or full page contents.
+export function networkSummary(url: string, resource: string, error?: string, status?: number) {
+  let host = 'invalid-url';
+  try { host = new URL(url).hostname; } catch { /* No raw URL in logs. */ }
+  return {
+    host, resource,
+    ...(error !== undefined ? { error: error.match(/\bnet::ERR_[A-Z0-9_]+\b/)?.[0] ?? 'NETWORK_FAILURE' } : {}),
+    ...(status !== undefined ? { status } : {}),
+  };
+}
+
 export function isFareEndpoint(value: string): boolean {
   try {
     const url = new URL(value);

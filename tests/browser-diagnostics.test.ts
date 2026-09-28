@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isFareEndpoint, pageSignal } from '../src/providers/tigerair-diagnostics.js';
+import { isFareEndpoint, pageSignal, networkSummary } from '../src/providers/tigerair-diagnostics.js';
+
+test('network diagnostics preserve error codes without leaking URLs or credentials', () => {
+  const result = networkSummary('https://user:secret@cdn.example/private-token.js?token=secret#secret', 'script', 'net::ERR_CONNECTION_RESET https://secret.example/token');
+  assert.deepEqual(result, { host: 'cdn.example', resource: 'script', error: 'net::ERR_CONNECTION_RESET' });
+  assert.deepEqual(networkSummary('bad secret', 'fetch', 'secret failure'), { host: 'invalid-url', resource: 'fetch', error: 'NETWORK_FAILURE' });
+  assert.deepEqual(networkSummary('https://api.example/secret', 'xhr', undefined, 403), { host: 'api.example', resource: 'xhr', status: 403 });
+});
 
 test('fare endpoint accepts query parameters but never another host or route', () => {
   assert.equal(isFareEndpoint('https://api-book.tigerairtw.com/graphql?version=2'), true);
