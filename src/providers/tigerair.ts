@@ -5,7 +5,8 @@ import type { FlightProvider } from './base.js';
 import { searchSchema, todayTaipei } from '../validation.js';
 import { parseTigerairResponse } from './tigerair-parser.js';
 import { getBookingUrl } from './tigerair-url.js';
-import { isFareEndpoint, pageSignal, networkSummary } from './tigerair-diagnostics.js';
+import { isFareEndpoint, isWaitingRoomDenied, pageSignal, networkSummary } from './tigerair-diagnostics.js';
+import { ProviderAccessDeniedError } from './access-denied.js';
 
 export interface BrowserOptions {
   channel?: string;
@@ -45,6 +46,10 @@ export class TigerairProvider implements FlightProvider {
       const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
       page = await context.newPage();
       page.setDefaultTimeout(timeout);
+      // Start listening before navigation. Stop when the waiting-room service
+      // explicitly rejects access; do not keep polling it for every route.
+      let rejectAccess!: (error: Error) => void;
+      const accessDenied = new Promise<never>((_, reject) => { rejectAccess = reject; });
       page.on('request', request => {
         if (isFareEndpoint(request.url())) diagnostic.fareRequests++;
       });
@@ -52,6 +57,9 @@ export class TigerairProvider implements FlightProvider {
         if (isFareEndpoint(response.url()) && diagnostic.fareStatuses.length < 20) diagnostic.fareStatuses.push(response.status());
         if (response.status() >= 400 && diagnostic.httpErrors.length < 20) {
           diagnostic.httpErrors.push(networkSummary(response.url(), response.request().resourceType(), undefined, response.status()));
+        }
+        if (isWaitingRoomDenied(response.url(), response.status())) {
+          rejectAccess(new ProviderAccessDeniedError(this.name, 'api-wr.tigerairtw.com', 403));
         }
       });
       page.on('requestfailed', request => {
@@ -68,7 +76,7 @@ export class TigerairProvider implements FlightProvider {
         try { return response.request().postDataJSON()?.operationName === 'appFlightSearchResult'; }
         catch { return false; }
       }, { timeout });
-      const [response] = await Promise.all([
+      const [response] = await Promise.race([accessDenied, Promise.all([
         responsePromise,
         (async () => {
           console.log('[Browser] Opening booking page');
@@ -82,7 +90,7 @@ export class TigerairProvider implements FlightProvider {
             throw new Error('Tigerair booking page returned Access Denied. No price recorded.');
           }
         })(),
-      ]);
+      ])]);
       if (!response.ok()) throw new Error(`Tigerair fare HTTP ${response.status()}`);
       diagnostic.phase = 'parsing-fare';
       const result = parseTigerairResponse(await response.json(), input);

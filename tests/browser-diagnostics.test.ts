@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isFareEndpoint, pageSignal, networkSummary } from '../src/providers/tigerair-diagnostics.js';
+import { isFareEndpoint, isWaitingRoomDenied, pageSignal, networkSummary } from '../src/providers/tigerair-diagnostics.js';
+
+test('only waiting-room 403 rejects access, not membership or analytics errors', () => {
+  assert.equal(isWaitingRoomDenied('https://api-wr.tigerairtw.com/assign_queue_num', 403), true);
+  assert.equal(isWaitingRoomDenied('https://api-wr.tigerairtw.com/queue_num', 200), false);
+  assert.equal(isWaitingRoomDenied('https://api-membership.tigerairtw.com/api/app/me/profiles', 401), false);
+  assert.equal(isWaitingRoomDenied('https://analytics.google.com/', 403), false);
+  assert.equal(isWaitingRoomDenied('https://api-wr.tigerairtw.com.evil.example/', 403), false);
+  assert.equal(pageSignal('目前同時訂位人數較多，請稍候…'), 'waiting-room');
+});
 
 test('network diagnostics preserve error codes without leaking URLs or credentials', () => {
   const result = networkSummary('https://user:secret@cdn.example/private-token.js?token=secret#secret', 'script', 'net::ERR_CONNECTION_RESET https://secret.example/token');

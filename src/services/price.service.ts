@@ -4,6 +4,7 @@ import type { AlertRecord, MonitorRepository, PriceHistory, WatchRule } from '..
 import { searchKey, todayTaipei, watchRuleSchema } from '../validation.js';
 import { checkTriggerConditions } from './alert.service.js';
 import type { NotificationSender } from './email.service.js';
+import { ProviderAccessDeniedError } from '../providers/access-denied.js';
 
 export class PriceService {
   private providers = new Map<string, FlightProvider>();
@@ -72,10 +73,20 @@ export class PriceService {
       console.log(`[Progress] Loaded ${rules.length} enabled rules`);
       if (!rules.length) console.log('[Monitor] No enabled watch rules');
       summary.failed += await this.flushAlerts(rules);
+      const blockedProviders = new Set<string>();
       for (const rule of rules) {
+        if (blockedProviders.has(rule.provider)) {
+          summary.skipped++;
+          console.warn(`[Rule ${rule.id} skipped] Provider access was rejected earlier in this run`);
+          continue;
+        }
         if (rule.departureDate < todayTaipei()) { summary.skipped++; continue; }
         try { await this.runRule(rule); summary.checked++; }
-        catch (error) { summary.failed++; console.error(`[Rule ${rule.id} failed]`, (error as Error).message); }
+        catch (error) {
+          summary.failed++;
+          console.error(`[Rule ${rule.id} failed]`, (error as Error).message);
+          if (error instanceof ProviderAccessDeniedError) blockedProviders.add(rule.provider);
+        }
       }
       summary.failed += await this.flushAlerts(rules);
       return summary;

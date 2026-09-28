@@ -16,9 +16,14 @@ export function isFareEndpoint(value: string): boolean {
   } catch { return false; }
 }
 
+export function isWaitingRoomDenied(url: string, status: number): boolean {
+  try { return new URL(url).origin === 'https://api-wr.tigerairtw.com' && status === 403; }
+  catch { return false; }
+}
+
 export function pageSignal(text: string): string {
   if (/Access Denied|You don't have permission to access|存取遭拒/i.test(text)) return 'access-denied';
   if (/verify you are human|確認您是人類|驗證您是真人|完成驗證|機器人驗證/i.test(text)) return 'verification-required';
-  if (/waiting room|排隊中|等候室|輪到您/i.test(text)) return 'waiting-room';
+  if (/waiting room|排隊中|等候室|輪到您|目前同時訂位人數較多|即將帶您進入台灣虎航訂票系統/i.test(text)) return 'waiting-room';
   return 'unknown';
 }

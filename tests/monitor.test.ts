@@ -11,6 +11,7 @@ import { PriceService } from '../src/services/price.service.js';
 import { LocalRepository } from '../src/db/local.repository.js';
 import { parseTigerairResponse } from '../src/providers/tigerair-parser.js';
 import { config } from '../src/config.js';
+import { ProviderAccessDeniedError } from '../src/providers/access-denied.js';
 import { searchKey, watchRuleSchema } from '../src/validation.js';
 import type { AlertRecord, PriceHistory, WatchRule } from '../src/types/index.js';
 
@@ -55,6 +56,25 @@ async function local(r: WatchRule = rule) {
   await writeFile(rules, JSON.stringify([r]));
   return { directory, rules, repository: new LocalRepository(directory, rules) };
 }
+
+test('access denial stops remaining provider queries without recording prices or sending email', async () => {
+  const { rules, repository } = await local();
+  await writeFile(rules, JSON.stringify([rule, { ...rule, id: 'second-rule' }]));
+  let calls = 0;
+  const provider = { name: 'tigerair', search: async () => {
+    calls++;
+    throw new ProviderAccessDeniedError('tigerair', 'api-wr.tigerairtw.com', 403);
+  } };
+  const service = new PriceService(repository, { send: async () => { throw new Error('Must not send'); } }, [provider], true);
+  assert.deepEqual(await service.runAllActiveRules(), { checked: 0, failed: 1, skipped: 1 });
+  assert.equal(calls, 1);
+  // A rejected run must release its lock and allow a later independently scheduled run.
+  const owner = randomUUID();
+  assert.equal(await repository.acquireLock(owner), true);
+  await repository.releaseLock(owner);
+  assert.deepEqual(await repository.getHistory(rule.id, searchKey(rule), '2020-01-01T00:00:00Z', '2099-01-01T00:00:00Z'), []);
+  assert.deepEqual(await repository.getPendingAlerts(), []);
+});
 test('delivery failure preserves history and pending alert; restart retries without duplicate', async () => {
   const { directory, rules, repository } = await local();
   let failing = true;
