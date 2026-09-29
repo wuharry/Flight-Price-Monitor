@@ -9,22 +9,24 @@ test('Gmail uses TLS, authenticated sender, normalized app password and stable m
     assert.equal(options.host, 'smtp.gmail.com'); assert.equal(options.secure, true); assert.equal(options.port, 465);
     assert.equal((options.auth as { pass: string }).pass, 'abcdefghijklmnop');
     return { close: () => { closed++; }, sendMail: async mail => {
-      assert.deepEqual(mail.from, { name: 'Flight Monitor', address: 'sender@gmail.com' });
+      assert.deepEqual(mail.from, { name: 'Tickets', address: 'sender@gmail.com' });
+      assert.equal(mail.replyTo, 'desk@example.com');
       assert.deepEqual(mail.to, ['recipient@example.com']); ids.push(mail.messageId);
       return { accepted: ['recipient@example.com'], rejected: [] };
     } };
   };
-  for (let i=0;i<2;i++) await sendGmail('sender@gmail.com', 'abcd efgh ijkl mnop', 'recipient@example.com', message, 'alert-1', factory);
+  for (let i=0;i<2;i++) await sendGmail('sender@gmail.com', 'abcd efgh ijkl mnop', 'recipient@example.com', message, 'alert-1',
+    { fromName: 'Tickets', replyTo: 'desk@example.com', factory });
   assert.equal(ids[0], ids[1]); assert.equal(closed, 2);
 });
 test('Gmail failures close connection and hide raw credentials; rejected recipients fail', async () => {
   let closed = 0;
-  await assert.rejects(sendGmail('sender@gmail.com','test','recipient@example.com',message,'id',()=>({
+  await assert.rejects(sendGmail('sender@gmail.com','test','recipient@example.com',message,'id',{ factory: ()=>({
     close:()=>{closed++;}, sendMail:async()=>{throw Object.assign(new Error('SECRET'),{code:'EAUTH'});}
-  })), e => /authentication failed/.test(String(e)) && !String(e).includes('SECRET'));
-  await assert.rejects(sendGmail('sender@gmail.com','test','recipient@example.com',message,'id',()=>({
+  }) }), e => /authentication failed/.test(String(e)) && !String(e).includes('SECRET'));
+  await assert.rejects(sendGmail('sender@gmail.com','test','recipient@example.com',message,'id',{ factory: ()=>({
     close:()=>{closed++;}, sendMail:async()=>({accepted:[],rejected:['recipient@example.com']})
-  })), /not confirmed/);
+  }) }), /not confirmed/);
   assert.equal(closed,2);
 });
 test('Gmail config accepts app password without requiring Resend or a custom domain', () => {
@@ -32,4 +34,22 @@ test('Gmail config accepts app password without requiring Resend or a custom dom
   assert.equal(parseConfig(env).EMAIL_PROVIDER,'gmail');
   assert.throws(()=>parseConfig({...env,GMAIL_APP_PASSWORD:''}),/GMAIL_APP_PASSWORD/);
   assert.throws(()=>parseConfig({...env,GMAIL_USER:'invalid'}));
+});
+
+test('Gmail keeps the default sender name and omits Reply-To when unset', async () => {
+  await sendGmail('sender@gmail.com', 'abcdefghijklmnop', 'recipient@example.com', message, 'alert-2', {
+    factory: () => ({ close: () => {}, sendMail: async mail => {
+      assert.deepEqual(mail.from, { name: 'Flight Monitor', address: 'sender@gmail.com' });
+      assert.equal('replyTo' in mail, false);
+      return { accepted: ['recipient@example.com'], rejected: [] };
+    } }),
+  });
+});
+
+test('Reply-To must be a real address when configured', () => {
+  const env = { STORAGE:'local',EMAIL_MODE:'send',EMAIL_PROVIDER:'gmail',GMAIL_USER:'sender@gmail.com',
+    GMAIL_APP_PASSWORD:'abcd efgh ijkl mnop',NOTIFICATION_TO_EMAIL:'to@example.com' };
+  assert.equal(parseConfig({ ...env, EMAIL_REPLY_TO:'desk@example.com' }).EMAIL_REPLY_TO, 'desk@example.com');
+  assert.equal(parseConfig(env).EMAIL_FROM_NAME, 'Flight Monitor');
+  assert.throws(() => parseConfig({ ...env, EMAIL_REPLY_TO:'not-an-address' }));
 });

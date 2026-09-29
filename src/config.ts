@@ -13,6 +13,9 @@ const envSchema = z.object({
   GMAIL_APP_PASSWORD: z.string().default(''),
   RESEND_API_KEY: z.string().default(''),
   NOTIFICATION_FROM_EMAIL: z.string().default('Flight Monitor <alerts@example.com>'),
+  EMAIL_FROM_NAME: z.string().default('Flight Monitor'),
+  EMAIL_REPLY_TO: z.string().default(''),
+  DESKTOP_NOTIFY: z.enum(['true', 'false']).default('false'),
   NOTIFICATION_TO_EMAIL: z.string().default(''),
   MONITOR_INTERVAL_MINUTES: z.coerce.number().int().min(60).max(1440).default(180),
   BROWSER_CHANNEL: z.enum(['chromium', 'chrome', 'msedge']).default('chromium'),
@@ -34,6 +37,7 @@ export function parseConfig(env: NodeJS.ProcessEnv) {
       if (value.NOTIFICATION_FROM_EMAIL.includes('example.com')) throw new Error('Configure a verified sender domain');
     }
     if (value.NOTIFICATION_TO_EMAIL || value.STORAGE === 'local') z.string().email().parse(value.NOTIFICATION_TO_EMAIL);
+    if (value.EMAIL_REPLY_TO) z.string().email().parse(value.EMAIL_REPLY_TO);
   }
   return value;
 }

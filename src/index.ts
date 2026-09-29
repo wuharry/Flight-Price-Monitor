@@ -2,7 +2,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { config } from './config.js';
 import { LocalRepository } from './db/local.repository.js';
 import { PriceRepository } from './db/price.repository.js';
-import { EmailService } from './services/email.service.js';
+import { EmailService, renderEmail, type NotificationSender } from './services/email.service.js';
+import { notifyDesktop } from './services/desktop-notify.js';
 import { PriceService } from './services/price.service.js';
 import { TigerairProvider } from './providers/tigerair.js';
 import { getSupabaseClient } from './db/supabase.js';
@@ -19,7 +20,16 @@ async function main() {
     if (error || typeof data !== 'string') throw new Error('Cannot resolve verified rule owner email');
     return data;
   });
-  const service = new PriceService(repository, email, [new TigerairProvider()], config.EMAIL_MODE === 'send');
+  // The toast wraps the mail sender rather than replacing it, so a machine with no desktop session
+  // still checks prices and mails; only the toast is skipped.
+  const notifier: NotificationSender = config.DESKTOP_NOTIFY !== 'true' ? email : {
+    async send(alert) {
+      const outcome = await email.send(alert);
+      await notifyDesktop(renderEmail(alert).subject, alert.payload.trigger.reason);
+      return outcome;
+    },
+  };
+  const service = new PriceService(repository, notifier, [new TigerairProvider()], config.EMAIL_MODE === 'send');
   const stop = new AbortController();
   const signal = () => stop.abort();
   process.once('SIGINT', signal);

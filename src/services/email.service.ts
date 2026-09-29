@@ -34,7 +34,8 @@ export class EmailService implements NotificationSender {
     const to = alert.payload.rule.userId ? await this.recipient?.(alert) : this.options.NOTIFICATION_TO_EMAIL;
     if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('No verified recipient for this monitoring rule');
     if (this.options.EMAIL_PROVIDER === 'gmail') {
-      await sendGmail(this.options.GMAIL_USER, this.options.GMAIL_APP_PASSWORD, to, message, alert.id, this.gmailFactory);
+      await sendGmail(this.options.GMAIL_USER, this.options.GMAIL_APP_PASSWORD, to, message, alert.id,
+        { fromName: this.options.EMAIL_FROM_NAME, replyTo: this.options.EMAIL_REPLY_TO || undefined, factory: this.gmailFactory });
       console.log('[Email] Gmail accepted alert ' + alert.id);
       return 'sent';
     }
@@ -42,7 +43,8 @@ export class EmailService implements NotificationSender {
       method: 'POST', signal: AbortSignal.timeout(20000),
       headers: { Authorization: `Bearer ${this.options.RESEND_API_KEY}`, 'Content-Type': 'application/json',
         'Idempotency-Key': `flight-alert/${alert.id}` },
-      body: JSON.stringify({ from: this.options.NOTIFICATION_FROM_EMAIL, to: [to], ...message }),
+      body: JSON.stringify({ from: this.options.NOTIFICATION_FROM_EMAIL, to: [to], ...message,
+        ...(this.options.EMAIL_REPLY_TO ? { reply_to: this.options.EMAIL_REPLY_TO } : {}) }),
     });
     const body = await response.json() as { id?: string; message?: string; error?: unknown };
     if (!response.ok || body.error || !body.id) throw new Error(`Resend delivery failed (HTTP ${response.status})`);
