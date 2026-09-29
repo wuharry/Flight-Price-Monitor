@@ -1,4 +1,4 @@
-import { chromium, type Page, type Response } from 'playwright';
+import { chromium, type Page, type Response } from 'playwright-core';
 import { config } from '../config.js';
 import type { FlightPriceResult, FlightSearch } from '../types/index.js';
 import type { FlightProvider } from './base.js';
@@ -26,8 +26,14 @@ export class TigerairProvider implements FlightProvider {
     const timeout = this.options.timeoutMs ?? config.BROWSER_TIMEOUT_MS;
     const channel = this.options.channel ?? config.BROWSER_CHANNEL;
     console.log('[Browser] Launching browser');
+    const headless = this.options.headless ?? config.BROWSER_HEADLESS === 'true';
+    // Tigerair rejects any request whose sec-ch-ua reports "HeadlessChrome". Playwright's default
+    // headless shell leaks that token in the client hint even when the User-Agent is overridden, and
+    // the client hint cannot be changed from here. Chrome's own headless mode reports "Chromium"
+    // instead, so it passes once the User-Agent below is fixed, with no visible window.
     const browser = await chromium.launch({
-      headless: this.options.headless ?? config.BROWSER_HEADLESS === 'true',
+      headless: false,
+      args: headless ? ['--headless=new'] : [],
       channel: channel === 'chromium' ? undefined : channel,
       timeout,
     });
@@ -43,7 +49,13 @@ export class TigerairProvider implements FlightProvider {
       pageHost: '', bodyCharacters: 0,
     };
     try {
-      const context = await browser.newContext({ locale: 'zh-TW', timezoneId: 'Asia/Taipei' });
+      const probe = await browser.newPage();
+      const agent = await probe.evaluate(() => navigator.userAgent);
+      await probe.close();
+      const context = await browser.newContext({
+        locale: 'zh-TW', timezoneId: 'Asia/Taipei',
+        userAgent: agent.includes('HeadlessChrome') ? agent.replace('HeadlessChrome', 'Chrome') : undefined,
+      });
       page = await context.newPage();
       page.setDefaultTimeout(timeout);
       // Start listening before navigation. Stop when the waiting-room service
