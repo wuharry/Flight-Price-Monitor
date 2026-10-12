@@ -3,7 +3,8 @@ import { config } from './config.js';
 import { LocalRepository } from './db/local.repository.js';
 import { PriceRepository } from './db/price.repository.js';
 import { EmailService, renderEmail, type NotificationSender } from './services/email.service.js';
-import { notifyDesktop } from './services/desktop-notify.js';
+import { notifyDesktop, openUrl } from './services/desktop-notify.js';
+import { startAdmin } from './admin/server.js';
 import { PriceService } from './services/price.service.js';
 import { TigerairProvider } from './providers/tigerair.js';
 import { getSupabaseClient } from './db/supabase.js';
@@ -11,7 +12,14 @@ import { getSupabaseClient } from './db/supabase.js';
 async function main() {
   console.log('[Startup] Node monitor started', JSON.stringify({ storage: config.STORAGE, emailMode: config.EMAIL_MODE, browser: config.BROWSER_CHANNEL }));
   const flags = new Set(process.argv.slice(2));
-  for (const flag of flags) if (!['--run-once', '--once'].includes(flag)) throw new Error('Unknown argument: ' + flag);
+  for (const flag of flags) if (!['--run-once', '--once', '--setup'].includes(flag)) throw new Error('Unknown argument: ' + flag);
+  if (flags.has('--setup')) {
+    const { url } = await startAdmin(process.cwd());
+    console.log(`設定介面已啟動（只有這台電腦連得到）：\n${url}\n設定完成後回到這個視窗按 Ctrl+C 結束。`);
+    await openUrl(url);
+    await new Promise<void>(resolve => { process.once('SIGINT', resolve); process.once('SIGTERM', resolve); });
+    return;
+  }
   const once = flags.has('--run-once') || flags.has('--once');
   const repository = config.STORAGE === 'supabase' ? new PriceRepository() :
     new LocalRepository(config.DATA_DIR, config.WATCH_RULES_FILE);

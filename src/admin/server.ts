@@ -18,6 +18,13 @@ const settingsSchema = z.object({
   NOTIFICATION_FROM_EMAIL: z.string().min(1), NOTIFICATION_TO_EMAIL: z.string().email(),
   EMAIL_MODE: z.enum(['preview', 'send']),
 });
+// A bundled single-file build has no package directory to read from, so its build step inlines the
+// page here. Running from source leaves the constant undefined and the file is read as before.
+declare const __ADMIN_UI_HTML__: string | undefined;
+const readUi = () => typeof __ADMIN_UI_HTML__ === 'string'
+  ? Promise.resolve(__ADMIN_UI_HTML__)
+  : readFile(new URL('./ui.html', import.meta.url), 'utf8');
+
 export async function startAdmin(root = process.cwd(), port = 4317) {
   const token = randomBytes(32).toString('hex');
   const envFile = resolve(root, '.env');
@@ -47,7 +54,7 @@ export async function startAdmin(root = process.cwd(), port = 4317) {
     if (req.headers.host !== host) return reply(403, { error: 'Host rejected' });
     if (req.url === '/' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(await readFile(new URL('./ui.html', import.meta.url), 'utf8')); return;
+      res.end(await readUi()); return;
     }
     if (req.headers.authorization !== `Bearer ${token}` || (req.headers.origin && req.headers.origin !== `http://${host}`)) return reply(403, { error: '請使用啟動時顯示的完整網址開啟管理頁' });
     const mutation = req.method === 'POST';

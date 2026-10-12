@@ -42,3 +42,17 @@ export async function notifyDesktop(title: string, body: string, runner: Command
     return false;
   }
 }
+
+export async function openUrl(url: string, runner: CommandRunner = defaultRunner) {
+  const command: [string, string[]] | undefined =
+    process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] :
+    process.platform === 'darwin' ? ['open', [url]] :
+    process.platform === 'linux' ? ['xdg-open', [url]] : undefined;
+  if (!command) return false;
+  try { await runner(command[0], command[1], process.env); return true; }
+  catch (error) {
+    // Printing the address is enough; the operator can paste it themselves.
+    console.warn('[Setup] Could not open a browser: ' + (error as Error).message.split('\n')[0]);
+    return false;
+  }
+}

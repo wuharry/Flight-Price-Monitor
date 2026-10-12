@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import { createRequire } from 'node:module';
-import { access, cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 const out = 'exe-dist';
@@ -20,6 +20,11 @@ await build({
   entryPoints: ['src/index.ts'],
   bundle: true, platform: 'node', target: 'node22', format: 'cjs',
   outfile: join(out, 'monitor.cjs'),
+  // The setup page has no package directory to be read from once everything is one file.
+  define: { __ADMIN_UI_HTML__: JSON.stringify(await readFile('src/admin/ui.html', 'utf8')) },
+  // The define above makes the page constant a string, so the branch that reads the file through
+  // import.meta.url is never taken in this build. Its warning would only hide real ones.
+  logOverride: { 'empty-import-meta': 'silent' },
   // playwright-core reads driver and protocol files from its own package directory at run time;
   // bundling it rewrites those paths and the browser never launches. Ship the package as-is.
   external: ['playwright-core'],
@@ -41,7 +46,10 @@ for (const name of ['.env.example', 'watch-rules.example.json']) {
 }
 await writeFile(join(out, 'README.txt'), `Flight Price Monitor - portable build
 
-Run it as-is:
+Set the routes, dates and price thresholds (opens a page in your browser):
+  node monitor.cjs --setup
+
+Check the prices once:
   node monitor.cjs --run-once
 
 Compile a Windows executable (needs Bun, cross-compiles from macOS):
@@ -60,5 +68,8 @@ then set in .env:
 
 Schedule it with Task Scheduler calling monitor.exe --run-once, not the resident loop:
 the scheduler catches up after sleep, a long-running process does not.
+
+DESKTOP_NOTIFY=true raises a notification on this machine when a price is reached, which needs
+no mail account at all. EMAIL_MODE=send additionally mails the alert.
 `);
 console.log(`[build:exe] ${out} is ready (config files are read from the executable's folder).`);
