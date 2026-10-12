@@ -34,9 +34,11 @@ export class EmailService implements NotificationSender {
     const to = alert.payload.rule.userId ? await this.recipient?.(alert) : this.options.NOTIFICATION_TO_EMAIL;
     if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('No verified recipient for this monitoring rule');
     if (this.options.EMAIL_PROVIDER === 'gmail') {
-      await sendGmail(this.options.GMAIL_USER, this.options.GMAIL_APP_PASSWORD, to, message, alert.id,
+      const messageId = await sendGmail(this.options.GMAIL_USER, this.options.GMAIL_APP_PASSWORD, to, message, alert.id,
         { fromName: this.options.EMAIL_FROM_NAME, replyTo: this.options.EMAIL_REPLY_TO || undefined, factory: this.gmailFactory });
-      console.log('[Email] Gmail accepted alert ' + alert.id);
+      // Acceptance by the submission server is not delivery; the ID is what a recipient's mail
+      // admin needs to find the message in a quarantine.
+      console.log('[Email] Gmail accepted alert ' + alert.id + ' as ' + messageId);
       return 'sent';
     }
     const response = await this.request('https://api.resend.com/emails', {

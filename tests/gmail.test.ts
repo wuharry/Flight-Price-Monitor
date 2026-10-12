@@ -15,9 +15,13 @@ test('Gmail uses TLS, authenticated sender, normalized app password and stable m
       return { accepted: ['recipient@example.com'], rejected: [] };
     } };
   };
-  for (let i=0;i<2;i++) await sendGmail('sender@gmail.com', 'abcd efgh ijkl mnop', 'recipient@example.com', message, 'alert-1',
-    { fromName: 'Tickets', replyTo: 'desk@example.com', factory });
+  const returned: string[] = [];
+  for (let i=0;i<2;i++) returned.push(await sendGmail('sender@gmail.com', 'abcd efgh ijkl mnop', 'recipient@example.com', message, 'alert-1',
+    { fromName: 'Tickets', replyTo: 'desk@example.com', factory }));
   assert.equal(ids[0], ids[1]); assert.equal(closed, 2);
+  // The caller logs this so a refused message can be traced in the recipient's quarantine.
+  assert.deepEqual(returned, ids);
+  assert.match(returned[0]!, /^<flight-alert-[0-9a-f]{64}@gmail\.com>$/);
 });
 test('Gmail failures close connection and hide raw credentials; rejected recipients fail', async () => {
   let closed = 0;
@@ -28,6 +32,20 @@ test('Gmail failures close connection and hide raw credentials; rejected recipie
     close:()=>{closed++;}, sendMail:async()=>({accepted:[],rejected:['recipient@example.com']})
   }) }), /not confirmed/);
   assert.equal(closed,2);
+});
+
+test('Gmail keeps SMTP status codes but not the raw response line', async () => {
+  // Without the codes every refusal reads alike; the codes name no address or credential.
+  await assert.rejects(sendGmail('sender@gmail.com','test','recipient@example.com',message,'id',{ factory: ()=>({
+    close:()=>{}, sendMail:async()=>{ throw Object.assign(new Error('refused'), { code:'EENVELOPE',
+      responseCode:550, response:'550 5.4.5 Daily user sending limit exceeded. victim@corp.example' }); },
+  }) }), e => {
+    const text = String(e);
+    assert.match(text, /SMTP 550 5\.4\.5/);
+    assert.equal(text.includes('victim@corp.example'), false);
+    assert.equal(text.includes('Daily user sending limit'), false);
+    return true;
+  });
 });
 test('Gmail config accepts app password without requiring Resend or a custom domain', () => {
   const env = { STORAGE:'supabase',SUPABASE_URL:'https://test.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'test',EMAIL_MODE:'send',EMAIL_PROVIDER:'gmail',GMAIL_USER:'sender@gmail.com',GMAIL_APP_PASSWORD:'abcd efgh ijkl mnop' };

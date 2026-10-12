@@ -17,6 +17,7 @@
     "test": "pnpm build && node --test dist/tests/*.test.js",
     "test:browser": "tsx scripts/test-browser.ts",
     "test:user-flow": "node scripts/test-user-flow.mjs",
+    "test:gmail": "tsx scripts/test-gmail.ts",
     "check-types": "tsc --noEmit",
     "build:exe": "pnpm check-types && node scripts/build-exe.mjs",
     "inspect:tigerair": "tsx scripts/inspect-tigerair.ts",
