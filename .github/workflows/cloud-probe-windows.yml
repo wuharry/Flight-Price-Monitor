@@ -1,8 +1,6 @@
 name: One-off Tigerair Windows headed integration test
 
 on:
-  push:
-    branches: ['codex/cloud-probe-windows-20261018']
   workflow_dispatch:
 
 permissions: {}
