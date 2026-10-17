@@ -1,8 +1,6 @@
 name: One-off Tigerair cloud integration test
 
 on:
-  push:
-    branches: ['codex/cloud-probe-20261018']
   workflow_dispatch:
 
 permissions: {}
