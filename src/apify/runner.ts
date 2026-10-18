@@ -6,19 +6,21 @@ import type { AlertRecord, FlightPriceResult, FlightSearch, MonitorRepository, W
 import type { EmailReceipt, NotificationSender } from '../services/email.service.js';
 import { PriceService } from '../services/price.service.js';
 import { googleFlightsPriceBasis, searchKey, searchSchema, todayTaipei, watchRuleSchema } from '../validation.js';
-import type { WebsiteJobs } from './website.js';
+import type { ScheduledNoopStatus, ScheduledWebsiteJobs, WebsiteJobs } from './website.js';
 
 const googleRule = z.preprocess(value => value && typeof value === 'object' ?
   { provider: 'google-flights', ...value } : value, watchRuleSchema).refine(rule =>
   rule.provider === 'google-flights' && !rule.userId, 'Actor rules require google-flights and a single environment recipient');
 export const actorInputSchema = z.object({
-  action: z.enum(['check', 'test-email', 'monitor', 'website-check']).default('check'),
+  action: z.enum(['check', 'test-email', 'monitor', 'website-check', 'scheduled-check']).default('check'),
   provider: z.literal('google-flights').default('google-flights'),
   search: searchSchema.optional(),
   watchRules: z.array(googleRule).min(1).max(1).optional(),
   jobId: z.string().uuid().optional(),
 }).strict().superRefine((input, context) => {
-  if (input.action === 'website-check') {
+  if (input.action === 'scheduled-check') {
+    if (input.search || input.watchRules || input.jobId) context.addIssue({ code: 'custom', message: 'Scheduled search and ownership must come only from the server reservation' });
+  } else if (input.action === 'website-check') {
     if (!input.jobId) context.addIssue({ code: 'custom', path: ['jobId'], message: 'website-check requires a queued job ID' });
     if (input.search || input.watchRules) context.addIssue({ code: 'custom', message: 'Website search and ownership must come from the queued database job' });
   } else if (input.action === 'monitor') {
@@ -42,6 +44,7 @@ export interface ActorDependencies {
   createEmail(options: MailConfig, recipient?: (alert: AlertRecord) => Promise<string>): ActorEmail;
   openRepository(rules: WatchRule[]): Promise<MonitorRepository>;
   openWebsiteJobs?(options: MailConfig): WebsiteJobs;
+  openScheduledJobs?(options: MailConfig): ScheduledWebsiteJobs;
   runId?: string;
 }
 export interface ActorOutput {
@@ -50,6 +53,7 @@ export interface ActorOutput {
   provider: 'google-flights';
   quote?: FlightPriceResult;
   job?: { id: string; status: 'succeeded' | 'failed' };
+  scheduled?: { status: ScheduledNoopStatus | 'checked' | 'failed' };
   monitor?: { checked: number; failed: number; skipped: number };
   email: { status: 'not-requested' | 'preview' | 'accepted' | 'not-triggered'; receipt?: Readonly<EmailReceipt>; testId?: string };
 }
@@ -67,17 +71,32 @@ function verifyQuote(quote: FlightPriceResult, search: FlightSearch): FlightPric
 export async function runActorInput(raw: unknown, dependencies: ActorDependencies): Promise<ActorOutput> {
   const input = actorInputSchema.parse(raw);
   if (dependencies.provider.name !== 'google-flights') throw new Error('Actor only supports Google Flights');
+  const base = { action: input.action, provider: 'google-flights' as const };
+  const scheduled = input.action === 'scheduled-check';
+  const allowedEmails = scheduled ? [...new Set((dependencies.env.SCHEDULE_ALLOWED_EMAILS ?? '')
+    .split(',').map(value => value.trim().toLowerCase()).filter(Boolean))] : [];
+  // A disabled schedule must not need credentials, open a DB connection, launch a
+  // browser, or instantiate a mail sender. A malformed nonempty list fails closed.
+  if (scheduled && !allowedEmails.length) return { ...base, status: 'SUCCEEDED',
+    scheduled: { status: 'disabled' }, email: { status: 'not-requested' } };
+  if (scheduled) z.array(z.string().email()).min(1).parse(allowedEmails);
   // check is always a read-only operation, even if the deployment enables mail.
   const mode = input.action === 'test-email' ? 'send' : input.action === 'check' ? 'preview' : dependencies.env.EMAIL_MODE;
-  const website = input.action === 'website-check';
+  const website = input.action === 'website-check' || scheduled;
   const options = parseConfig({ ...dependencies.env, STORAGE: website ? 'supabase' : 'local', DESKTOP_NOTIFY: 'false',
     ...(website ? { NOTIFICATION_TO_EMAIL: '' } : {}),
     EMAIL_MODE: mode, BROWSER_CHANNEL: 'chromium', BROWSER_HEADLESS: 'true', BROWSER_TIMEOUT_MS: '80000' });
-  const base = { action: input.action, provider: 'google-flights' as const };
   if (website) {
-    if (!dependencies.runId || !dependencies.openWebsiteJobs) throw new Error('Website worker is not configured');
-    const jobs = dependencies.openWebsiteJobs(options);
-    const claim = await jobs.claim(input.jobId!, dependencies.runId);
+    if (!dependencies.runId || (scheduled ? !dependencies.openScheduledJobs : !dependencies.openWebsiteJobs)) throw new Error('Website worker is not configured');
+    const jobs = scheduled ? dependencies.openScheduledJobs!(options) : dependencies.openWebsiteJobs!(options);
+    let jobId = input.jobId;
+    if (scheduled) {
+      const reservation = await (jobs as ScheduledWebsiteJobs).reserveScheduled(allowedEmails);
+      if (reservation.status !== 'reserved') return { ...base, status: 'SUCCEEDED',
+        scheduled: { status: reservation.status }, email: { status: 'not-requested' } };
+      jobId = reservation.jobId;
+    }
+    const claim = await jobs.claim(jobId!, dependencies.runId);
     let finished = false;
     let quote: FlightPriceResult | undefined;
     let email: ActorEmail | undefined;
@@ -95,6 +114,7 @@ export async function runActorInput(raw: unknown, dependencies: ActorDependencie
         ...(!succeeded ? { errorCode: 'query-or-notification-failed' as const } : {}) });
       return { ...base, status: succeeded ? 'SUCCEEDED' : 'FAILED', quote,
         job: { id: claim.id, status: succeeded ? 'succeeded' : 'failed' }, monitor: summary,
+        ...(scheduled ? { scheduled: { status: succeeded ? 'checked' as const : 'failed' as const } } : {}),
         email: { status: emailStatus } };
     } catch {
       if (!finished) await jobs.finish(claim, { status: 'failed', errorCode: 'worker-failed',

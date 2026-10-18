@@ -1,59 +1,63 @@
 # 叔叔使用的雲端查價網站
 
-這次沿用 GitHub Pages 網站及 Supabase 的登入、資料庫與使用者資料隔離；Apify 負責執行已通過雲端實測的 Google Flights 查價。不新增 Google Cloud 服務。所有程式都是按需執行，這份設定不會建立或啟用排程。
+網站沿用 GitHub Pages、Supabase 登入與資料庫，由私人 Apify Actor 執行 Google Flights 查價。每日排程使用 Apify 原生雲端排程，不依賴管理員或使用者電腦，也不使用 Codex 本機自動化或 Google Cloud 付費服務。
 
 ## 使用方式
 
-1. 用手機或電腦開網站，以自己的已驗證 Email 登入。
-2. 填出發／抵達機場、去回程日期、成人人數與目標總價，按「儲存監控」。
-3. 在該航線按「立即查價」。網站顯示執行中及完成結果，重新開網頁也能查看結果。
+1. 用原本已驗證的 Email 與網站密碼登入。
+2. 填好機場、去回程日期、成人人數、通知價格門檻，勾選「啟用此行程」並儲存。
+3. 每天台北時間 **09:00～09:20、21:00～21:20** 分早晚兩輪查詢已啟用行程；符合條件才寄信。電腦與網頁可關閉。
+4. 全部受邀帳號合計有 5 條以下符合資格的行程時，每條每天最多早晚各查一次；超過 5 條時，每條每天最多自動查一次，依最久未嘗試的行程優先處理。
+5. 需要當下票價可按「立即查價」；每天另保留最多 2 次手動額度。手動或失敗的嘗試會占用當輪；超過 5 條時，占用該行程當天的自動查價機會。
+6. 停用行程可停止之後的排程；已經開始的這一次工作可能仍會完成。新增或修改行程不會立刻寄信，會等待下一個符合資格且有容量的時槽。
 
-查價開始後在雲端繼續執行，使用者不需要保持電腦開機。**目前不會定時自動查價**；儲存條件、重新整理或打開網站，都不會開始下一次查價。通知顯示「預覽」時沒有寄信；「寄件服務已接受」也不等於收件匣已送達。
+網站只在伺服器確認排程已開通時顯示「每日自動查價」。無法讀取狀態、帳號未獲邀或尚未啟用時，不會臆測排程正在運作。通知顯示「寄件服務已接受」只代表 SMTP 接受，仍需收件人查看收件匣與垃圾郵件。
 
-參考價格來源是 Google Flights 的台灣虎航直飛行程。它是選定行程的含稅參考總價，不保證是所有組合最低價，也未確認為 tigerLight 票種；來源資料可能延遲最多約 24 小時。付款、行李等選購項目及實際可售價格請以航空公司結帳頁為準。較舊的虎航官網紀錄與新來源分別標示，避免混為同一種票價。
+價格為 Google Flights 選定的台灣虎航直飛行程之含稅參考總價，不保證是所有組合最低價，也未確認為 tigerLight；來源可能延遲最多約 24 小時。票種、行李、選購與實際可售價格以航空公司結帳頁為準。舊來源與新來源的歷史分開比較。
 
-## 服務連接方式
+## 每日排程與資料隔離
 
-網站使用已登入帳號呼叫 Supabase Edge Function `cloud-check`，只提交自己已儲存的規則 ID。後端再次驗證登入、信箱、規則所有權、日期、啟用狀態及用量限制，再啟動私人 Apify Actor。前端不能指定任意 Actor input、收件人或雲端資源。結果寫回 Supabase，網站以使用者自己的 RLS 權限讀取。
+Apify 原生排程每天在 09:00、09:05、09:10、09:15、09:20，以及 21:00、21:05、21:10、21:15、21:20（Asia/Taipei）啟動同一個私人 Actor。cron 為 `0,5,10,15,20 9,21 * * *`，時區固定 `Asia/Taipei`。每次只選取一條啟用、日期未過期、擁有者已驗證且同時在資料庫與 Runtime 允許名單的行程。找不到符合條件的行程就快速結束，不開啟查價瀏覽器、不寄信。
 
-Apify API token、Supabase server key 與 Gmail 應用程式密碼都只留在後端，不能放入網站 bundle、GitHub Pages 變數、公開儲存庫、網址或日誌。Apify Actor 的環境變數不得套用到建置環境。
+每日頻率依資料庫允許名單內、已驗證擁有者的啟用 Google Flights 未過期行程總數判定，不會因個別 worker 的 Runtime 名單較少而變成較高頻率。總數 5 條以下時，每條每天最多自動 2 次，每輪最多一次任何來源的嘗試；超過 5 條時，當天已有任何來源嘗試的行程不再自動執行。早輪的紀錄區間為台北 00:00 起至 18:00 前，晚輪為 18:00 起至當日結束；實際啟動時間仍只有上述 09:00 與 21:00 時槽。
 
-## 免費用量與重複點擊
+輸入只有 action=scheduled-check、provider=google-flights；航線、收件人和所有權都從資料庫讀取，不接受輸入任意收件人或搜尋條件。工作先原子預約再 claim，一次最多查一條，失敗、過期及回應不明仍計次，不會在同一輪自動重試同一條。手動查價亦共用這份紀錄。選取順序為尚未嘗試優先，其次依最近一次嘗試由舊到新排序。
 
-網站查價共用最多每日 8 次、每個台北時間曆月 240 次的保守限制；兩次啟動至少間隔 2 分鐘，同時間只允許一個網站工作。這些限制涵蓋所有允許的帳號及航線；刪除規則不會退還次數。等待逾時或雲端開始回應不明時，不自動重送，先查看工作狀態。
+行程若有最近 23 小時建立的 pending 通知，排程會先跳過，避免早輪寄件結果不明時在晚輪自動重寄。滿 23 小時後才可再次自動查價，由既有通知流程處理過期紀錄。此新增限制只影響自動排程；手動查價流程不變。
 
-Actor 固定 1 GB、180 秒上限。按目前 Free 計價，跑滿 180 秒的運算約 US$0.01／次，31 天每天 8 次的運算約 US$2.48，另有建置、資料儲存、流量等用量。這些次數限制不是金額保證，Apify 主控台中的其他工作及手動啟動也會共用帳戶額度；曆月也不一定等於平台帳期。
+排程最多同時一個、手動最多同時一個，不同規則可並行；同一規則不可同時執行。網站 worker 使用規則範圍的鎖與資料存取，既有全規則監控鎖也會互相排斥。通知只寄給目前擁有者的已驗證信箱。
 
-不產生額外帳單的條件是保留 Apify **Free、不加付款方式、不升級**，額度耗盡後平台停止服務；Supabase 也維持 Free。不能為了恢復服務按升級或付費加購。Supabase Free 長期無活動可能暫停，需由管理員恢復；免費服務不提供不中斷保證。
+目前只開放叔叔帳號，網站每帳號最多 10 條規則。每日共 10 個時槽，5 條以下可分早晚各查一次，6～10 條可依序各查一次。手動嘗試、通知等待、失敗、服務中斷或額度不足仍可能使部分行程當天未查完。若日後增加其他帳號，這些時槽與額度會共用，必須重新規劃容量；不應宣稱任意帳號數都能每天查完。
 
-官方說明：[Apify Free 額度耗盡行為](https://docs.apify.com/account/subscriptions)、[Apify 計價](https://apify.com/pricing)、[Supabase Free 額度及暫停](https://supabase.com/pricing)。
+## 不產生額外帳單的條件
 
-## 管理員部署前檢查
+- Apify 保持 **Free、沒有付款方式、不升級**；免費額度耗盡由平台阻擋服務，不加購續跑。Supabase 與公開 GitHub Pages 也維持免費方案。
+- 每個 Actor run 固定 1 GB、180 秒上限，不設定錯誤後重啟，不啟動子 Actor。
+- 自動最多 10 次／台北日、310 次／預算區間；手動最多 2 次／日、62 次／預算區間；總上限 12 次／日、372 次／預算區間。區間為「今天及前 30 個台北日期」，從最早日期的台北 00:00 起算，跨曆月不重置，也不受排程啟動秒數或伺服器時區影響。失敗、等待過期、未知回應都不退還，刪除規則也不會刪除已消耗額度。
+- 10 個固定排程時槽（含沒有行程的空工作）及每日 2 次手動工作，若全部用滿 1 GB × 180 秒，31 天運算約 US$3.72，另有建置、資料儲存及流量。這只是運算估算，真正不產生額外帳單仍依靠 Free 的平台阻擋；其他專案工作也會共用帳戶額度。
 
-1. 確認目前可存取正確的 Supabase 專案，且組織為 Free。不要使用其他專案的資料庫替代。
-2. 依序執行 `src/db/schema.sql`、`src/db/multi-user.sql`、`src/db/cloud-check.sql`。遷移可重跑，保留原規則及歷史；不會把原規則自動改成另一種來源。
-3. 部署 `supabase/functions/cloud-check`，保留平台 JWT 驗證及函式內的 `auth.getUser()` 驗證。設定後端 `CLOUD_CHECK_ALLOWED_ORIGINS`（網站 origin，逗號分隔）及 `CLOUD_CHECK_ALLOWED_EMAILS`（已驗證帳號信箱，逗號分隔）；名單預設空白，不允許任何帳號啟動查價，初始僅加入叔叔及管理員。
-4. 將僅供私人 Actor 的 Apify token 存入 Supabase Edge Secret `APIFY_CLOUD_CHECK_TOKEN`；以 `APIFY_CLOUD_CHECK_ACTOR_ID`、`APIFY_CLOUD_CHECK_BUILD` 固定本次 Actor 與建置版本。將正確的 `SUPABASE_URL` 及 `SUPABASE_SERVICE_ROLE_KEY` 存入私人 Apify Actor Runtime Secret。這是新的跨服務存取權，必須由帳號持有人確認後才儲存。不要整份上傳 `.env`。
-5. 用 `pnpm build:apify` 產生白名單部署檔，更新 Actor；保留固定記憶體與逾時，不建立排程。Edge 設定應指向本次驗證完成的 Actor build。
-6. 網站建置只使用該 Supabase 專案的 URL 與 publishable／anon 公開金鑰。
-7. 在 Supabase → Authentication → URL Configuration，把 **Site URL** 設為正式 GitHub Pages 完整網址，並在 **Redirect URLs** 加入同一網址，例如 `https://wuharry.github.io/Flight-Price-Monitor/`。必須包含專案路徑與結尾 `/`，不能只填網域；若正式 deployment URL 不同，兩處都改用實際完整網址。這個網址用於註冊驗證及重設密碼返回網站。確認 Email provider、信箱驗證及驗證信投遞可用，實測登入／註冊後再發送連結給叔叔。
-8. 從網站測試一個真實條件，確認只有該使用者的規則被查價、結果回寫、狀態可在重開網頁後恢復；另由收件人確認實際收信，才能記為送達驗證完成。
+免費服務可能暫停、故障或額度耗盡，屆時當天查詢可能未完成；不會為補跑而升級或扣款。Supabase Free 也可能因低活動暫停，需管理員恢復。
 
-### 目前驗證狀態
+官方說明：[排程](https://docs.apify.com/actors/running/schedules)、[Schedule API](https://docs.apify.com/api/v2/schedules-post)、[Apify 計價](https://apify.com/pricing)、[Free 額度上限](https://help.apify.com/en/articles/11079614-reaching-platform-limits)、[Supabase 可用性](https://supabase.com/docs/guides/deployment/going-into-prod)。
 
-2026-10-19（Asia/Taipei）已獲使用者授權保留跨服務 Secret。專用 Apify API token 僅授予指定私人 Actor 的 **Read／Run**，採 Restricted access；未授予帳戶全面權限、Full-permission Actors 權限或儲存空間查詢權限。Runtime 憑證加密保存，不套用到 build。
+## 管理員部署順序
 
-原 Supabase Free 專案已完成三份資料庫遷移。支援網站工作的 Actor **0.0.12** 建置成功，`cloud-check` Edge Function 依同版原始碼部署，平台 JWT 驗證維持開啟；GitHub Pages 正式網站部署成功。
+1. 備份目前規則與工作紀錄。依序套用 schema.sql、multi-user.sql、cloud-check.sql、daily-check.sql；新排程設定預設關閉，允許名單預設空白。瀏覽器不能寫工作、預算、鎖或排程設定。
+2. 將排程允許的已驗證帳號放入私人資料庫 cloud_monitor_settings.allowed_emails 與 Actor Runtime SCHEDULE_ALLOWED_EMAILS；既有 Supabase、Gmail 憑證只留在加密後端，不能套用到建置環境、網站或公開紀錄。
+3. 建置 Actor，保留 1 GB／180 秒並固定成功 build。Actor 預設 Input 與排程 Input 都改成最小的 scheduled-check＋google-flights，避免舊 search 範例被平台合併。保留手動網站 worker 與原有 check 等入口。
+4. Edge Function cloud-check 繼續驗證使用者 JWT、信箱與規則所有權，並將 APIFY_CLOUD_CHECK_BUILD 固定到新版。手動預約的新限額由 SQL 統一執行。
+5. 發布網站；登入後以 get_cloud_schedule_status RPC 讀取實際啟用狀態。Supabase Auth Site URL／Redirect URLs 仍為完整 Pages 網址（含專案路徑與結尾 /）。
+6. 建立原生排程，cron 為 `0,5,10,15,20 9,21 * * *`、timezone 為 `Asia/Taipei`，指定成功 build、1024 MB、180 秒、restartOnError=false。核對 Console 的 Next runs 為早晚兩輪、每天合計 10 個時槽後，才開啟資料庫排程設定。
+7. 用原生排程立即執行一次，確認只查一筆、結果回寫、通知按條件處理；沒有符合規則時必須成功 no-op。由收件人另外確認實際送達。
 
-已從正式網站完成一次真實流程：
+要全局停止時，同時停用原生排程與 cloud_monitor_settings.enabled。叔叔只需在網站停用個別行程。舊 GitHub Flight monitor workflow 的 MONITOR_ENABLED 維持未設定，避免雙重排程。
 
-- 以指定收件人的已驗證網站帳號登入，新增獨立測試行程：TPE → NRT、2027-02-10～2027-02-16、1 位成人，臨時測試目標總價 TWD 50,000。
-- 只按一次「立即查價」，取得 Google Flights 虎航含稅參考總價 **TWD 16,088**。整個 Actor run 為 32 秒（含啟動），資料庫 claim 到 finish 約 13 秒；工作狀態 `succeeded`、`email_status=accepted`。
-- 保存 1 筆票價歷史與 1 筆 `below_target` 通知，通知已標記 `sent`。重新載入網站後，結果仍保持。
-- 測試規則已停用，原有 5 筆規則逐欄比對完全未改。本次只建立 1 個雲端工作，沒有重送。
+## 驗證紀錄
 
-**上述 `accepted`／`sent` 僅代表 Gmail SMTP 接受，叔叔的收件匣送達仍待確認。** 較早的獨立 Actor 查價與寄信測試見 [實測紀錄](APIFY-TEST-RESULTS.md)。本次公開驗證紀錄省略真實信箱、使用者／工作／執行／Actor 識別碼及憑證。
+2026-10-19 原手動網站流程已查得 TPE → NRT、2027-02-10～02-16、1 位成人的 Google Flights 參考價 TWD 16,088，保存一筆歷史與一筆通知，Gmail SMTP 接受。測試行程已停用；收件人尚未確認送達。當時原 5 筆規則逐欄未改，Actor 整體 run 32 秒、顯示消耗免費額度 US$0.002。
 
-GitHub `MONITOR_ENABLED` 變數仍未設定，沒有開啟自動排程。本次 run 使用 1 GB，Apify 主控台顯示成本 **US$0.002**，從免費額度扣除；當時帳期 Free 用量為 **US$0.07／5.00**，剩餘 **US$4.93**。這些是本次觀察，不能當作未來每次的固定價格或收費保證；上方保留的預算數字也只是運算估算。
+2026-10-19 約 07:32（Asia/Taipei），Apify 原生排程已啟用，cron `0,5,10,15,20 9,21 * * *` 與台北時區核對正確。透過原生排程執行的 Actor build 0.0.13 成功，Console 顯示 Origin 為 Scheduler；限制為 180 秒、1024 MB，實際約 29 秒，該次顯示消耗免費額度 US$0.001。Input 僅有 scheduled-check 與 google-flights，沒有帶入搜尋條件或另啟子工作。
 
-上線前的 2026-10-18 程式驗證：97 項核心／SQL／權限測試、5 項網站邏輯測試通過；型別檢查、Actor 打包與差異檢查通過。Chrome 本機模擬操作完成登入、建立 Google Flights 行程、單次查價、執行期間按鈕停用、票價與預覽狀態呈現、重載恢復結果、停用行程阻止查價、登出清除資料。手機寬度 390px 測試無橫向溢出，沒有瀏覽器警告或錯誤。這些本機網站操作使用虛構資料，不呼叫 Apify、不寄信；畫面留存於 `artifacts/website-cloud/`，與上述正式實測分開記錄。
+該次直接讀取原 5 筆行程中的 TPE → NGO、2026-11-13～11-20、1 位成人，查得 Google Flights 含稅參考總價 TWD 14,291。監控結果為 checked=1、skipped=0、failed=0，寄件服務狀態 accepted；收件人尚未確認收件匣送達。原 5 筆行程僅將 provider 改為 google-flights，其餘欄位保留；已停用的測試行程未更動。
+
+資料庫已核對該次 scheduled 工作為 succeeded，新增一筆 TWD 14,291 歷史與一筆 below_target 通知，通知標記 sent；寄件接受與實際送達仍分別確認。當時平台顯示當期使用免費額度 US$0.08／US$5，剩餘約 US$4.92，這是免費額度使用量，並非額外帳單。133 項離線測試、型別檢查與建置全部通過。

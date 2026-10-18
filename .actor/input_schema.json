@@ -1,14 +1,61 @@
 {
-  "title": "手動查詢 Google Flights 虎航參考價",
-  "description": "每次只執行一次，不會建立排程。Google Flights 報價可能延遲，不代表 tigerLight 或虎航即時結帳價。寄信設定請放 Runtime Secret，勿放 Input。",
+  "title": "Google Flights 虎航參考價監控",
+  "description": "每次執行最多查詢一條行程；排程只由伺服器選取已啟用的網站行程。Google Flights 報價可能延遲，不代表 tigerLight 或虎航即時結帳價。寄信設定請放 Runtime Secret，勿放 Input。",
   "type": "object",
   "schemaVersion": 1,
   "properties": {
-    "action": { "title": "執行動作", "description": "每次只執行所選動作一次；查價成功後才可寄信。網站工作只能由已登入後端佇列建立。", "type": "string", "editor": "select", "enum": ["check", "test-email", "monitor", "website-check"], "enumTitles": ["只查價（不寄信）", "查價成功後寄測試信", "執行一次監控規則", "執行網站已排入的單次查價"], "default": "check" },
-    "provider": { "title": "報價來源", "description": "使用 Google Flights 所選虎航直飛行程的航空公司賣方參考價。", "type": "string", "editor": "select", "enum": ["google-flights"], "default": "google-flights" },
-    "search": { "title": "查詢條件（check / test-email）", "type": "object", "editor": "json", "description": "填入 origin、destination、departureDate、可選 returnDate、adults、currency（TWD）。日期格式 YYYY-MM-DD。monitor 請移除此欄位。", "prefill": { "origin": "TPE", "destination": "NRT", "departureDate": "2027-02-10", "returnDate": "2027-02-16", "adults": 1, "currency": "TWD" } },
-    "watchRules": { "title": "監控規則（monitor）", "type": "array", "editor": "json", "description": "每次限一條。需 id、provider=google-flights 與查詢條件；可設 targetPrice、notifyNewLow、newLowDays、dropAmount、dropPercent、enabled。check / test-email / website-check 請移除此欄位。" },
-    "jobId": { "title": "網站工作 ID（website-check）", "type": "string", "editor": "textfield", "description": "僅供已驗證的網站後端呼叫。只接受已排入的工作 UUID，航線、規則、擁有者與收件人一律從後端驗證讀取。website-check 請移除 search 與 watchRules。" }
+    "action": {
+      "title": "執行動作",
+      "description": "每次只執行所選動作一次；網站與排程工作的航線、擁有者及收件人一律由資料庫驗證。scheduled-check 僅保留 action 與 provider。",
+      "type": "string",
+      "editor": "select",
+      "enum": [
+        "check",
+        "test-email",
+        "monitor",
+        "website-check",
+        "scheduled-check"
+      ],
+      "enumTitles": [
+        "只查價（不寄信）",
+        "查價成功後寄測試信",
+        "執行一次監控規則",
+        "執行網站已排入的單次查價",
+        "執行每日網站監控時槽"
+      ],
+      "default": "check"
+    },
+    "provider": {
+      "title": "報價來源",
+      "description": "使用 Google Flights 所選虎航直飛行程的航空公司賣方參考價。",
+      "type": "string",
+      "editor": "select",
+      "enum": [
+        "google-flights"
+      ],
+      "default": "google-flights"
+    },
+    "search": {
+      "title": "查詢條件（check / test-email）",
+      "type": "object",
+      "editor": "json",
+      "description": "check / test-email 必填 origin、destination、departureDate、可選 returnDate、adults、currency（TWD）。日期格式 YYYY-MM-DD。monitor / website-check / scheduled-check 請移除此欄位。"
+    },
+    "watchRules": {
+      "title": "監控規則（monitor）",
+      "type": "array",
+      "editor": "json",
+      "description": "每次限一條。需 id、provider=google-flights 與查詢條件；可設 targetPrice、notifyNewLow、newLowDays、dropAmount、dropPercent、enabled。check / test-email / website-check / scheduled-check 請移除此欄位。"
+    },
+    "jobId": {
+      "title": "網站工作 ID（website-check）",
+      "type": "string",
+      "editor": "textfield",
+      "description": "僅供已驗證的網站後端呼叫。只接受已排入的工作 UUID，航線、規則、擁有者與收件人一律從後端驗證讀取。website-check 請移除 search 與 watchRules；scheduled-check 請移除此欄位。"
+    }
   },
-  "required": ["action", "provider"]
+  "required": [
+    "action",
+    "provider"
+  ]
 }

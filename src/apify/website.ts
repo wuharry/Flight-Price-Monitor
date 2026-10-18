@@ -19,6 +19,16 @@ export interface WebsiteJobs {
   recipient(claim: WebsiteClaim, alert: AlertRecord): Promise<string>;
   finish(claim: WebsiteClaim, completion: WebsiteCompletion): Promise<void>;
 }
+export type ScheduledNoopStatus = 'disabled' | 'no-eligible-rule' | 'daily-limit' | 'monthly-limit' | 'busy';
+export type ScheduledReservation = { status: 'reserved'; jobId: string } | { status: ScheduledNoopStatus };
+export interface ScheduledWebsiteJobs extends WebsiteJobs {
+  reserveScheduled(allowedEmails: string[]): Promise<ScheduledReservation>;
+}
+
+const scheduledReservationSchema = z.union([
+  z.object({ status: z.literal('reserved'), jobId: z.string().uuid() }),
+  z.object({ status: z.enum(['disabled', 'no-eligible-rule', 'daily-limit', 'monthly-limit', 'busy']) }),
+]);
 
 const claimSchema = z.object({
   id: z.string().uuid(), watch_rule_id: z.string().uuid(), user_id: z.string().uuid(),
@@ -26,8 +36,19 @@ const claimSchema = z.object({
 });
 
 /** The public website supplies only a queued job ID. All search/ownership comes from SQL. */
-export class SupabaseWebsiteJobs implements WebsiteJobs {
+export class SupabaseWebsiteJobs implements ScheduledWebsiteJobs {
   constructor(private client: SupabaseClient) {}
+  async reserveScheduled(allowedEmails: string[]): Promise<ScheduledReservation> {
+    // Do not make an ambiguous reservation request a second time. SQL consumes the
+    // slot atomically; a lost response is a failed run, never a second selection.
+    if (!allowedEmails.length) return { status: 'disabled' };
+    const emails = z.array(z.string().email()).min(1).parse(allowedEmails);
+    const { data, error } = await this.client.rpc('reserve_scheduled_cloud_check_job', { p_allowed_emails: emails });
+    if (error || !data) throw new Error('Scheduled reservation could not be confirmed; it will not be retried');
+    const result = scheduledReservationSchema.safeParse(data);
+    if (!result.success) throw new Error('Scheduled reservation returned an invalid result; it will not be retried');
+    return result.data;
+  }
   async claim(jobId: string, runId: string): Promise<WebsiteClaim> {
     z.string().uuid().parse(jobId);
     if (!/^[a-zA-Z0-9]{1,80}$/.test(runId)) throw new Error('Website job requires a cloud run ID');
@@ -74,7 +95,7 @@ export class SupabaseWebsiteJobs implements WebsiteJobs {
   }
 }
 
-export function createWebsiteJobs(options: ReturnType<typeof parseConfig>): WebsiteJobs {
+export function createWebsiteJobs(options: ReturnType<typeof parseConfig>): ScheduledWebsiteJobs {
   if (options.STORAGE !== 'supabase') throw new Error('Website worker requires Supabase storage');
   const url = new URL(options.SUPABASE_URL);
   if (url.protocol !== 'https:') throw new Error('Website worker requires HTTPS Supabase');

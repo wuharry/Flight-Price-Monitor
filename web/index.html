@@ -34,10 +34,10 @@
       <div class="hero-card">
         <div class="hero-badge">
           <span class="badge-dot"></span>
-          <span>台灣虎航直飛參考價 · 開啟網站即可使用</span>
+          <span>台灣虎航直飛參考價 · 雲端查價與通知</span>
         </div>
         <h1>想出國走走？<br><span class="highlight">等一個心動好價格。</span></h1>
-        <p class="intro">填好想去的地方、日期與預算，按一下「立即查價」。查詢會交給雲端執行，電腦不必一直開著；完成後回到這裡看票價與通知結果。</p>
+        <p class="intro">填好想去的地方、日期與預算，啟用並儲存行程。帳號獲邀且雲端服務啟用後，早晚由雲端輪流查價，符合條件時寄信，電腦不必一直開著；也能按「立即查價」先查一次。</p>
 
         <div class="feature-grid">
           <div class="feature-item">
@@ -57,8 +57,8 @@
           <div class="feature-item">
             <span class="feature-icon">📩</span>
             <div>
-              <strong>3. 按「立即查價」</strong>
-              <p>稍後回來看結果，無須安裝程式</p>
+              <strong>3. 啟用並儲存</strong>
+              <p>雲端早晚輪流查價，符合條件時寄信</p>
             </div>
           </div>
         </div>
@@ -130,14 +130,14 @@
         <div>
           <span class="eyebrow">FLIGHT PRICE RADAR</span>
           <h1>我的旅行查價</h1>
-          <p class="muted banner-notice">填行程 → 儲存 → 按「立即查價」。關閉網頁後，已送出的這一次查詢仍會繼續，稍後回來看結果即可。</p>
+          <p id="dashboard-intro" class="muted banner-notice">填行程 → 啟用並儲存 → 確認下方排程狀態。也可按「立即查價」先查一次。</p>
         </div>
         <button id="refresh" class="secondary refresh-btn" type="button">🔄 重新整理</button>
       </div>
 
       <div class="manual-mode-banner" role="note">
-        <strong>目前為手動查價｜自動排程未開啟</strong>
-        <p>每按一次只查一次；儲存行程不會自動查價或寄信。免費查價共用每日 8 次、每月 240 次上限，額滿後停止，避免額外消耗。</p>
+        <strong id="schedule-title">每日自動查價狀態未知</strong>
+        <p id="schedule-detail">登入後正在確認排程狀態；尚未確認啟用前，請勿視為已安排每日查價。</p>
       </div>
 
       <div class="stats">
@@ -154,7 +154,7 @@
         <div class="stat-card">
           <div class="stat-icon-wrap">🟢</div>
           <div class="stat-content">
-            <span class="stat-label">可手動查價</span>
+            <span id="active-label" class="stat-label">可查價行程</span>
             <div class="stat-number-wrap">
               <strong id="active">—</strong>
               <span class="stat-sub">組行程</span>
@@ -177,7 +177,7 @@
           <div class="card-top-bar">
             <div>
               <h2>我的行程</h2>
-              <span class="muted small">按「立即查價」取得一次參考票價，通常約需 1～3 分鐘。</span>
+              <span class="muted small">每日排程狀態請看上方；想先查一次可按「立即查價」，通常約需 1～3 分鐘。</span>
             </div>
             <span class="count-badge" id="list-count-badge">已儲存 0 組</span>
           </div>
@@ -325,7 +325,7 @@
               </label>
               <label class="check">
                 <input name="enabled" type="checkbox" checked>
-                <span class="check-text"><strong>啟用此行程</strong>：允許按「立即查價」，不會啟動自動排程</span>
+                <span class="check-text"><strong>啟用此行程</strong>：<span id="enabled-help">雲端排程開通後會每天查價；儲存不會立即寄信</span></span>
               </label>
             </div>
 
