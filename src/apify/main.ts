@@ -34,6 +34,7 @@ await Actor.main(async () => {
       createEmail: (options, recipient) => new EmailService(options, fetch, recipient),
       runId: Actor.getEnv().actorRunId ?? undefined,
       openWebsiteJobs: createWebsiteJobs,
+      openScheduledJobs: createWebsiteJobs,
       openRepository: async rules => {
         const suffix = (process.env.APIFY_ACTOR_ID ?? 'local').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 30);
         const name = `flight-monitor-google-flights-v1-${suffix}`;
@@ -49,11 +50,11 @@ await Actor.main(async () => {
       departureDate: output.quote?.departureDate, returnDate: output.quote?.returnDate,
       adults: output.quote?.adults, totalPrice: output.quote?.totalPrice, currency: output.quote?.currency,
       priceBasis: output.quote?.priceBasis, emailStatus: output.email.status,
-      testId: output.email.testId, monitor: output.monitor, job: output.job })
+      testId: output.email.testId, monitor: output.monitor, job: output.job, scheduled: output.scheduled })
       .catch(() => console.warn('[Actor] Summary table unavailable; complete result remains in OUTPUT'));
     console.log('[Actor result]', JSON.stringify({ status: output.status, action: output.action, provider: output.provider,
       totalPrice: output.quote?.totalPrice, priceBasis: output.quote?.priceBasis,
-      monitor: output.monitor, emailStatus: output.email.status, testId: output.email.testId,
+      monitor: output.monitor, scheduled: output.scheduled, emailStatus: output.email.status, testId: output.email.testId,
       messageId: output.email.receipt?.messageId, accepted: output.email.receipt?.accepted }));
     if (output.status !== 'SUCCEEDED') throw new Error('A monitoring query or notification failed; see OUTPUT');
   } catch {

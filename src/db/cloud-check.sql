@@ -7,6 +7,7 @@ create table if not exists public.cloud_check_jobs (
   -- Deliberately keep quota records after a rule/account is deleted.
   watch_rule_id uuid not null,
   user_id uuid not null,
+  trigger_source text not null default 'manual' check (trigger_source in ('manual','scheduled')),
   status text not null default 'reserved' check (status in ('reserved', 'running', 'succeeded', 'failed', 'expired')),
   run_id text,
   created_at timestamptz not null default now(),
@@ -18,8 +19,18 @@ create table if not exists public.cloud_check_jobs (
   error_code text check (error_code ~ '^[a-z][a-z0-9_-]{0,63}$'),
   email_status text check (email_status in ('accepted', 'preview', 'not-triggered'))
 );
+-- Existing reservations remain manual; attempts never disappear when their rule does.
+alter table public.cloud_check_jobs add column if not exists trigger_source text not null default 'manual';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conrelid='public.cloud_check_jobs'::regclass
+    and conname='cloud_check_jobs_trigger_source_check') then
+    alter table public.cloud_check_jobs add constraint cloud_check_jobs_trigger_source_check
+      check (trigger_source in ('manual','scheduled'));
+  end if;
+end $$;
 create index if not exists cloud_check_jobs_created on public.cloud_check_jobs(created_at desc);
 create index if not exists cloud_check_jobs_owner on public.cloud_check_jobs(user_id, created_at desc);
+create index if not exists cloud_check_jobs_rule_created on public.cloud_check_jobs(watch_rule_id, created_at desc);
 alter table public.cloud_check_jobs enable row level security;
 revoke all on public.cloud_check_jobs from anon, authenticated;
 grant select on public.cloud_check_jobs to authenticated;
@@ -37,16 +48,19 @@ declare
   v_email text;
   v_job public.cloud_check_jobs;
   v_today timestamptz := date_trunc('day', now() at time zone 'Asia/Taipei') at time zone 'Asia/Taipei';
-  v_month timestamptz := date_trunc('month', now() at time zone 'Asia/Taipei') at time zone 'Asia/Taipei';
+  -- The current Taipei day plus its preceding 30 days, avoiding cron jitter at 09:00.
+  v_window timestamptz := (((now() at time zone 'Asia/Taipei')::date - 30)::timestamp at time zone 'Asia/Taipei');
   v_day_count integer;
   v_month_count integer;
+  v_global_day_count integer;
+  v_global_month_count integer;
 begin
   -- One transaction serializes the account-wide active/cooldown/quota checks.
   perform pg_advisory_xact_lock(hashtextextended('flight-monitor-cloud-check-v1', 0));
   select lower(u.email) into v_email from auth.users u
     where u.id = p_user_id and u.email_confirmed_at is not null;
   if v_email is null or p_allowed_emails is null or cardinality(p_allowed_emails) = 0
-    or not coalesce(v_email = any(p_allowed_emails), false) or not exists (
+    or not exists (select 1 from unnest(p_allowed_emails) e where lower(btrim(e))=v_email) or not exists (
     select 1 from public.watch_rules r where r.id = p_rule_id and r.user_id = p_user_id
       and r.enabled and r.provider = 'google-flights'
       and r.departure_date >= (now() at time zone 'Asia/Taipei')::date
@@ -54,17 +68,21 @@ begin
 
   update public.cloud_check_jobs set status = 'expired', finished_at = now(), error_code = 'expired'
     where status in ('reserved','running') and expires_at <= now();
-  if exists (select 1 from public.cloud_check_jobs where status in ('reserved','running') and expires_at > now())
+  if exists (select 1 from public.cloud_check_jobs where status in ('reserved','running') and expires_at > now()
+    and (trigger_source='manual' or watch_rule_id=p_rule_id))
     then raise exception 'cloud_check_busy'; end if;
-  if exists (select 1 from public.cloud_check_jobs where created_at > now() - interval '2 minutes')
+  if exists (select 1 from public.cloud_check_jobs where trigger_source='manual' and created_at > now() - interval '2 minutes')
     then raise exception 'cloud_check_cooldown'; end if;
-  select count(*) into v_day_count from public.cloud_check_jobs where created_at >= v_today;
-  select count(*) into v_month_count from public.cloud_check_jobs where created_at >= v_month;
-  if v_day_count >= 8 then raise exception 'cloud_check_daily_limit'; end if;
-  if v_month_count >= 240 then raise exception 'cloud_check_monthly_limit'; end if;
-  insert into public.cloud_check_jobs(watch_rule_id,user_id) values (p_rule_id,p_user_id) returning * into v_job;
+  select count(*) filter (where trigger_source='manual'), count(*) into v_day_count,v_global_day_count
+    from public.cloud_check_jobs where created_at >= v_today;
+  select count(*) filter (where trigger_source='manual'), count(*) into v_month_count,v_global_month_count
+    from public.cloud_check_jobs where created_at >= v_window;
+  if v_day_count >= 2 or v_global_day_count >= 12 then raise exception 'cloud_check_daily_limit'; end if;
+  if v_month_count >= 62 or v_global_month_count >= 372 then raise exception 'cloud_check_monthly_limit'; end if;
+  insert into public.cloud_check_jobs(watch_rule_id,user_id,trigger_source) values (p_rule_id,p_user_id,'manual') returning * into v_job;
   return jsonb_build_object('jobId',v_job.id,'status',v_job.status,'expiresAt',v_job.expires_at,
-    'remainingToday',7-v_day_count,'remainingMonth',239-v_month_count);
+    'remainingToday',least(1-v_day_count,11-v_global_day_count),
+    'remainingMonth',least(61-v_month_count,371-v_global_month_count));
 end;
 $$;
 

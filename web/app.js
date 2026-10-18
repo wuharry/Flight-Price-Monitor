@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { checkUnavailableReason, cloudErrorMessage, isActiveJob, jobPresentation, trustedGoogleBookingUrl } from './cloud-check-ui.js';
+import { checkUnavailableReason, cloudErrorMessage, isActiveJob, isRuleScheduled, jobPresentation, normalizeScheduleStatus, savedRuleMessage, schedulePresentation, trustedGoogleBookingUrl } from './cloud-check-ui.js';
 
 const client = createClient(__SUPABASE_URL__, __SUPABASE_KEY__);
 const $ = s => document.querySelector(s);
@@ -9,6 +9,7 @@ let noticeTimer = null;
 let historyRequest = 0;
 let cloudJobsRequest = 0, cloudJobs = new Map(), latestQuotes = new Map();
 let cloudPollTimer = null, cloudPollStartedAt = 0, cloudJobsIssue = '';
+let cloudSchedule = null, scheduleRequest = 0;
 const dispatchingRules = new Set();
 const redirect = new URL('./', location.href).href;
 
@@ -136,7 +137,7 @@ function updatePriceHint() {
   if (price > 0 && adults > 1) {
     calcEl.textContent = `💡 全部 ${adults} 位成人含稅總額（平均每位成人約 NT$ ${Math.round(price / adults).toLocaleString('zh-TW')}）`;
   } else if (price > 0) {
-    calcEl.textContent = `💡 按「立即查價」查得參考總價不超過 NT$ ${price.toLocaleString('zh-TW')} 時符合通知條件`;
+    calcEl.textContent = `💡 查得參考總價不超過 NT$ ${price.toLocaleString('zh-TW')} 時符合通知條件`;
   } else {
     calcEl.textContent = '選填；未設預算時，依下方勾選的新低或降價條件通知';
   }
@@ -235,7 +236,7 @@ async function history(ruleId) {
   $('#history').replaceChildren();
   if (!data.length) {
     const tr = node('tr', '');
-    const td = node('td', '還沒有票價紀錄。請在行程卡片按「立即查價」，完成後會顯示在這裡。', 'empty');
+    const td = node('td', '還沒有票價紀錄。每日查價完成後會顯示在這裡；也可按「立即查價」先查一次。請確認上方排程狀態。', 'empty');
     td.colSpan = 3;
     tr.append(td);
     $('#history').append(tr);
@@ -335,7 +336,7 @@ async function startCloudCheck(rule) {
       expires_at: data.expiresAt || new Date(Date.now() + 10 * 60 * 1000).toISOString(),
       created_at: new Date().toISOString(), error_code: data.dispatch === 'rejected' ? 'cloud-start-rejected' : null });
     cloudPollStartedAt = Date.now();
-    const remaining = Number.isInteger(data.remainingToday) ? `今天還可查 ${data.remainingToday} 次。` : '';
+    const remaining = Number.isInteger(data.remainingToday) ? `今天還可手動查 ${data.remainingToday} 次。` : '';
     notice(data.dispatch === 'rejected' ? cloudErrorMessage('cloud-start-rejected') : data.dispatch === 'unconfirmed'
       ? cloudErrorMessage('dispatch-uncertain') : `已送出一次雲端查價。${remaining}`, data.dispatch === 'rejected');
   } catch {
@@ -351,9 +352,42 @@ async function startCloudCheck(rule) {
   }
 }
 
+function renderScheduleState() {
+  const view = schedulePresentation(cloudSchedule);
+  $('#schedule-title').textContent = view.title;
+  $('#schedule-detail').textContent = view.detail;
+  $('#active-label').textContent = view.mode === 'enabled' ? '每日查價行程' : '可查價行程';
+  $('#dashboard-intro').textContent = view.mode === 'enabled'
+    ? '填行程 → 啟用並儲存 → 等下一輪雲端查價，符合條件時寄信。早晚各一輪，電腦與網頁不必一直開著。'
+    : '填行程 → 啟用並儲存 → 確認下方排程狀態。也可按「立即查價」先查一次。';
+  $('#enabled-help').textContent = view.mode === 'enabled'
+    ? `儲存後從下一輪安排，目前每條每天最多 ${view.checksPerRulePerDay} 次；停用後不再開始新查詢`
+    : view.mode === 'not-eligible' ? '帳號尚未開通，請聯絡管理員'
+      : '請先確認上方排程狀態；儲存不會立即查價或寄信';
+}
+
+async function refreshScheduleStatus() {
+  const version = generation, request = ++scheduleRequest;
+  cloudSchedule = null;
+  renderScheduleState();
+  if (user) renderRules();
+  try {
+    const { data, error } = await client.rpc('get_cloud_schedule_status');
+    if (version !== generation || request !== scheduleRequest || !user) return;
+    cloudSchedule = error ? null : normalizeScheduleStatus(data);
+  } catch {
+    if (version !== generation || request !== scheduleRequest || !user) return;
+    cloudSchedule = null;
+  }
+  renderScheduleState();
+  if (user) renderRules();
+}
+
 async function load() {
   if (!user) return;
   const version = generation;
+  await refreshScheduleStatus();
+  if (version !== generation || !user) return;
   const data = check(await client.from('watch_rules').select('*').order('created_at', { ascending: false }).limit(10));
   if (version !== generation || !user) return;
   rules = data;
@@ -375,7 +409,7 @@ function renderRules() {
 
   $('#rules').replaceChildren();
   if (!rules.length) {
-    $('#rules').append(node('p', '還沒有行程。\n請填寫下方或右側表單並儲存，再按「立即查價」。', 'empty'));
+    $('#rules').append(node('p', '還沒有行程。\n請填寫下方或右側表單，啟用並儲存，再確認上方排程狀態。', 'empty'));
   }
 
   for (const r of rules) {
@@ -394,7 +428,7 @@ function renderRules() {
     );
     titleGroup.append(routeSpan);
 
-    const badge = node('span', r.enabled ? '● 可查價' : '○ 已暫停', `badge ${r.enabled ? 'badge-active' : 'badge-paused'}`);
+    const badge = node('span', isRuleScheduled(r, cloudSchedule, todayTaipei()) ? '● 每日查價' : r.enabled ? '● 已啟用' : '○ 已暫停', `badge ${r.enabled ? 'badge-active' : 'badge-paused'}`);
     header.append(titleGroup, badge);
 
     // Details List
@@ -453,7 +487,7 @@ function renderRules() {
     const activeJob = isActiveJob(currentJob);
     const anyActiveJob = [...cloudJobs.values()].some(job => isActiveJob(job));
     checkNow.disabled = !!unavailable || anyActiveJob || dispatchingRules.size > 0;
-    checkNow.title = unavailable || (anyActiveJob ? '請等目前的查價完成' : '執行一次雲端查價，不會啟用排程');
+    checkNow.title = unavailable || (anyActiveJob ? '請等目前的查價完成' : '手動執行一次；此行程本輪的自動查價將略過');
     if (activeJob || dispatchingRules.has(r.id)) checkNow.textContent = dispatchingRules.has(r.id) ? '送出中…' : '查價中…';
     checkNow.onclick = () => startCloudCheck(r);
     const edit = node('button', '編輯', 'secondary');
@@ -490,7 +524,8 @@ function renderRules() {
       if (changed) {
         if (form.elements.id.value === r.id) form.elements.enabled.checked = !r.enabled;
         await load();
-        notice(r.enabled ? '已暫停此行程' : '已啟用此行程，可按「立即查價」；尚未開啟自動排程。');
+        notice(r.enabled ? '已停用此行程；不再開始新的每日查價，已執行中的查詢仍會繼續。'
+          : savedRuleMessage({ ...r, enabled: true }, cloudSchedule, todayTaipei()));
       }
     });
 
@@ -519,7 +554,7 @@ function renderRules() {
     checkArea.append(checkNow);
     const presentation = dispatchingRules.has(r.id) && !activeJob
       ? { tone: 'pending', title: '正在送出查價…', detail: '請稍候，請勿重複提交。' }
-      : jobPresentation(currentJob);
+      : jobPresentation(currentJob, Date.now(), { rule: r, schedule: cloudSchedule });
     const outcome = node('div', '', `cloud-job-status cloud-job-${presentation.tone}`);
     outcome.setAttribute('role', 'status');
     outcome.append(node('strong', presentation.title), node('p', presentation.detail));
@@ -534,7 +569,7 @@ function renderRules() {
         edit.onclick();
         form.elements.id.value = '';
         $('#editor-title').textContent = '新增雲端行程';
-        notice('已複製行程內容。請確認日期並儲存，再按「立即查價」。');
+        notice('已複製行程內容。請確認日期，啟用並儲存，再確認上方排程狀態。');
       };
       checkArea.append(copy);
     }
@@ -550,12 +585,15 @@ async function showSession(session, event) {
   generation++;
   historyRequest++;
   cloudJobsRequest++;
+  scheduleRequest++;
   stopCloudPolling();
   cloudPollStartedAt = 0;
   cloudJobs = new Map();
   latestQuotes = new Map();
   dispatchingRules.clear();
   cloudJobsIssue = '';
+  cloudSchedule = null;
+  renderScheduleState();
   currentFilterRuleId = null;
   user = session?.user || null;
   if (event === 'PASSWORD_RECOVERY') recovery = true;
@@ -609,7 +647,7 @@ $('#signup').onclick = () => {
       options: { emailRedirectTo: redirect }
     }));
     $('#login-password').value = '';
-    notice(data.session ? '註冊成功！已自動登入' : '註冊成功！請至信箱收取驗證連結，驗證後即可登入開始監控。');
+    notice(data.session ? '註冊成功！已自動登入；雲端查價僅開放已獲邀帳號。' : '註冊成功！請至信箱收取驗證連結；雲端查價需由管理員開通。');
   });
 };
 
@@ -763,7 +801,7 @@ form.onsubmit = e => {
     $('#reset-rule').textContent = '取消編輯';
     await load();
     [...document.querySelectorAll('.watch')].find(card => card.dataset.id === data.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    notice('行程已儲存。請在行程卡片按「立即查價」；儲存不會啟動排程或寄信。');
+    notice(savedRuleMessage({ ...values, provider: id ? rules.find(rule => rule.id === data.id)?.provider : 'google-flights' }, cloudSchedule, todayTaipei()));
   });
 };
 
@@ -776,7 +814,7 @@ document.addEventListener('visibilitychange', () => {
   stopCloudPolling();
   if (!document.hidden && user && !recovery) {
     const version = generation;
-    refreshCloudJobs({ latest: true }).then(() => {
+    Promise.all([refreshScheduleStatus(), refreshCloudJobs({ latest: true })]).then(() => {
       if (version !== generation || !user) return;
       renderRules();
       scheduleCloudPolling();

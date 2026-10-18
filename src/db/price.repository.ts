@@ -12,12 +12,16 @@ export class PriceRepository implements MonitorRepository {
     if (this.scope && ruleId !== this.scope.ruleId) throw new Error('Website worker cannot access another rule');
   }
   async acquireLock(owner: string): Promise<boolean> {
-    const { data, error } = await this.client.rpc('acquire_monitor_lock', { p_owner: owner });
+    const { data, error } = await this.client.rpc(this.scope ? 'acquire_rule_monitor_lock' : 'acquire_monitor_lock', {
+      p_owner: owner, ...(this.scope ? { p_rule_id: this.scope.ruleId, p_user_id: this.scope.userId } : {}),
+    });
     if (error) throw new Error('Acquire monitor lock: ' + error.message);
     return data === true;
   }
   async releaseLock(owner: string) {
-    const { error } = await this.client.rpc('release_monitor_lock', { p_owner: owner });
+    const { error } = await this.client.rpc(this.scope ? 'release_rule_monitor_lock' : 'release_monitor_lock', {
+      p_owner: owner, ...(this.scope ? { p_rule_id: this.scope.ruleId, p_user_id: this.scope.userId } : {}),
+    });
     if (error) throw new Error('Release monitor lock: ' + error.message);
   }
   async getActiveRules() {

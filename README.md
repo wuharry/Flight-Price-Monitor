@@ -1,8 +1,8 @@
 # Flight Price Monitor
 
-雲端單次查價可改用 Google Flights 的虎航航空公司參考價，部署到 Apify Free：[Apify 操作說明](docs/APIFY.md)。支援手動查價、查價後寄測試信及單次門檻監控，不會自動建立排程。`pnpm build:apify` 產生只包含必要程式的部署目錄，不打包 `.env` 或本機資料。
+雲端查價可改用 Google Flights 的虎航航空公司參考價，部署到 Apify Free：[Apify 操作說明](docs/APIFY.md)。支援手動查價、查價後寄測試信、單次門檻監控，以及由 Apify 原生排程觸發的網站監控。`pnpm build:apify` 只產生部署目錄，不會自行建立或啟用雲端排程，也不打包 `.env` 或本機資料。
 
-少量通知可使用 Gmail SMTP，無需購買寄信網域：[Gmail 設定與更新 Cloud Run](docs/GMAIL.md)。
+網站以 Supabase 儲存行程，Apify Free 每天執行 Google Flights 查價，符合條件時使用 Gmail SMTP 通知；使用者電腦可關機。設定與免費額度限制見 [雲端網站部署](docs/CLOUD-WEBSITE.md)。舊版寄信設定保留於 [Gmail 文件](docs/GMAIL.md)。
 
 多人網站：GitHub Pages 提供註冊、登入、個人監控與歷史票價；Supabase RLS 隔離資料。部署步驟見 [雲端網站部署](docs/CLOUD-WEBSITE.md)。本機管理工具見 [管理介面](docs/ADMIN.md)。
 

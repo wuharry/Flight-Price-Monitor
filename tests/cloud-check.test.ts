@@ -11,13 +11,16 @@ async function database() {
     create schema auth; create table auth.users(id uuid primary key,email text,email_confirmed_at timestamptz);
     create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
     grant usage on schema auth to authenticated; grant execute on function auth.uid() to authenticated;`);
+  // Freeze the database clock, not the implementation, so Taipei midnight/month boundaries cannot skip assertions.
+  await db.exec(`create or replace function pg_catalog.now() returns timestamptz language sql stable
+    as $$ select '2026-11-02T04:00:00Z'::timestamptz $$;`);
   for (const path of ['src/db/schema.sql', 'src/db/multi-user.sql', 'src/db/cloud-check.sql', 'src/db/cloud-check.sql']) await db.exec(await readFile(path, 'utf8'));
   const alice = randomUUID(), bob = randomUUID(), unverified = randomUUID();
   await db.query('insert into auth.users values ($1,$2,now()),($3,$4,now()),($5,$6,null)',
     [alice, 'uncle@example.com', bob, 'owner@example.com', unverified, 'other@example.com']);
   const rules = [randomUUID(), randomUUID(), randomUUID()];
   for (const [i, owner] of [alice, bob, unverified].entries()) await db.query(
-    "insert into watch_rules(id,user_id,provider,origin,destination,departure_date) values ($1,$2,'google-flights','TPE','NRT',current_date+30)", [rules[i],owner]);
+    "insert into watch_rules(id,user_id,provider,origin,destination,departure_date) values ($1,$2,'google-flights','TPE','NRT',now()::date+30)", [rules[i],owner]);
   const service = () => db.exec('reset role; set role service_role');
   const asUser = async (id: string) => { await db.exec('reset role'); await db.query("select set_config('request.jwt.claim.sub',$1,false)", [id]); await db.exec('set role authenticated'); };
   const reserve = async (rule: string, owner: string) => (await db.query<{job: {jobId: string; remainingToday: number; remainingMonth: number}}>(
@@ -39,7 +42,7 @@ test('cloud-check jobs keep ownership, run claims, expiry and quota data private
     await assert.rejects(reserve(rules[1],alice), /cloud_check_not_allowed/);
     await assert.rejects(reserve(rules[2],unverified), /cloud_check_not_allowed/);
     const job = await reserve(rules[0],alice);
-    assert.equal(job.remainingToday,7); assert.equal(job.remainingMonth,239);
+    assert.equal(job.remainingToday,1); assert.equal(job.remainingMonth,61);
     await assert.rejects(reserve(rules[1],bob), /cloud_check_busy/);
     await asUser(bob);
     assert.equal((await db.query('select * from cloud_check_jobs')).rows.length,0);
@@ -59,6 +62,8 @@ test('cloud-check jobs keep ownership, run claims, expiry and quota data private
     const next = await reserve(rules[1],bob);
     await db.query("update cloud_check_jobs set expires_at=now()-interval '1 second',created_at=now()-interval '3 minutes' where id=$1",[next.jobId]);
     await assert.rejects(db.query('select claim_cloud_check_job($1,$2)',[next.jobId,'lateRun']),/not_claimable/);
+    await assert.rejects(reserve(rules[0],alice),/daily_limit/);
+    await db.query("update cloud_check_jobs set created_at=now()-interval '1 day' where id=$1",[job.jobId]);
     const third = await reserve(rules[0],alice);
     assert.notEqual(third.jobId,next.jobId);
     assert.equal((await db.query<{status: string}>('select status from cloud_check_jobs where id=$1',[next.jobId])).rows[0].status,'expired');
@@ -69,26 +74,22 @@ test('cloud-check jobs keep ownership, run claims, expiry and quota data private
   } finally { await db.close(); }
 });
 
-test('cloud-check reservations count failures and enforce global Taipei daily/monthly limits', async t => {
+test('cloud-check manual reservations count failures against two Taipei daily and 62 rolling-31-day attempts', async () => {
   const { db,alice,rules,service,reserve } = await database();
   try {
     await service();
     await db.query(`insert into cloud_check_jobs(watch_rule_id,user_id,status,created_at,expires_at)
-      select $1,$2,'failed',date_trunc('day',now() at time zone 'Asia/Taipei') at time zone 'Asia/Taipei',now()-interval '1 hour'
-      from generate_series(1,8)`,[rules[0],alice]);
-    // Avoid making this test clock dependent in the first two minutes of a Taipei day.
-    await db.exec("update cloud_check_jobs set created_at=now()-interval '3 minutes' where created_at>now()-interval '2 minutes'");
-    const today = (await db.query<{n:number}>("select count(*)::integer n from cloud_check_jobs where created_at >= date_trunc('day',now() at time zone 'Asia/Taipei') at time zone 'Asia/Taipei'")).rows[0].n;
-    if (today === 8) await assert.rejects(reserve(rules[0],alice),/daily_limit/);
-    else t.diagnostic('Daily boundary is within first two minutes; midnight cooldown case covered by handler/other RPC test.');
+      select $1,$2,'failed',now()-interval '3 minutes',now()-interval '1 hour'
+      from generate_series(1,2)`,[rules[0],alice]);
+    await assert.rejects(reserve(rules[0],alice),/daily_limit/);
     await db.exec('delete from cloud_check_jobs');
-    const canSeedPriorDay = (await db.query<{ok:boolean}>("select ((now() at time zone 'Asia/Taipei')::date > date_trunc('month',now() at time zone 'Asia/Taipei')::date) ok")).rows[0].ok;
-    if (canSeedPriorDay) {
-      await db.query(`insert into cloud_check_jobs(watch_rule_id,user_id,status,created_at,expires_at)
-        select $1,$2,'failed',date_trunc('month',now() at time zone 'Asia/Taipei') at time zone 'Asia/Taipei',now()-interval '1 hour'
-        from generate_series(1,240)`,[rules[0],alice]);
-      await assert.rejects(reserve(rules[0],alice),/monthly_limit/);
-    } else t.diagnostic('Monthly cap cannot be reached before the daily cap on the first Taipei calendar day.');
+    await db.query(`insert into cloud_check_jobs(watch_rule_id,user_id,status,created_at,expires_at)
+      select $1,$2,'failed',now()-interval '30 days',now()-interval '1 hour'
+      from generate_series(1,62)`,[rules[0],alice]);
+    // These are in October while the clock is in November: a calendar-month reset must not bypass the cap.
+    await assert.rejects(reserve(rules[0],alice),/monthly_limit/);
+    await db.exec("update cloud_check_jobs set created_at=now()-interval '31 days 1 second'");
+    assert.equal((await reserve(rules[0],alice)).remainingMonth,61);
   } finally { await db.close(); }
 });
 
