@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { checkUnavailableReason, cloudErrorMessage, isActiveJob, jobPresentation, trustedGoogleBookingUrl } from './cloud-check-ui.js';
 
 const client = createClient(__SUPABASE_URL__, __SUPABASE_KEY__);
 const $ = s => document.querySelector(s);
@@ -6,6 +7,9 @@ const form = $('#rule-form');
 let user = null, rules = [], recovery = false, generation = 0, currentFilterRuleId = null;
 let noticeTimer = null;
 let historyRequest = 0;
+let cloudJobsRequest = 0, cloudJobs = new Map(), latestQuotes = new Map();
+let cloudPollTimer = null, cloudPollStartedAt = 0, cloudJobsIssue = '';
+const dispatchingRules = new Set();
 const redirect = new URL('./', location.href).href;
 
 function todayTaipei() {
@@ -132,7 +136,7 @@ function updatePriceHint() {
   if (price > 0 && adults > 1) {
     calcEl.textContent = `💡 全部 ${adults} 位成人含稅總額（平均每位成人約 NT$ ${Math.round(price / adults).toLocaleString('zh-TW')}）`;
   } else if (price > 0) {
-    calcEl.textContent = `💡 排程查得含稅總價不超過 NT$ ${price.toLocaleString('zh-TW')} 時符合通知條件`;
+    calcEl.textContent = `💡 按「立即查價」查得參考總價不超過 NT$ ${price.toLocaleString('zh-TW')} 時符合通知條件`;
   } else {
     calcEl.textContent = '選填；未設預算時，依下方勾選的新低或降價條件通知';
   }
@@ -162,6 +166,8 @@ function setTripType(type) {
 }
 
 function getBookingUrl(r) {
+  const publicQuoteUrl = trustedGoogleBookingUrl(latestQuotes.get(r.id));
+  if (r.provider === 'google-flights' && publicQuoteUrl) return publicQuoteUrl;
   const params = new URLSearchParams({
     adult: String(r.adults || 1),
     children: '0',
@@ -188,7 +194,7 @@ function resetRule() {
   form.elements.new_low_days.value = '30';
   form.elements.notify_new_low.checked = true;
   form.elements.enabled.checked = true;
-  $('#editor-title').textContent = '新增監控';
+  $('#editor-title').textContent = '新增行程';
   const cancelBtn = $('#cancel-edit-btn');
   if (cancelBtn) cancelBtn.hidden = true;
   $('#reset-rule').textContent = '新增另一條';
@@ -229,7 +235,7 @@ async function history(ruleId) {
   $('#history').replaceChildren();
   if (!data.length) {
     const tr = node('tr', '');
-    const td = node('td', '還沒有票價紀錄。背景排程查價完成後，請按重新整理查看。', 'empty');
+    const td = node('td', '還沒有票價紀錄。請在行程卡片按「立即查價」，完成後會顯示在這裡。', 'empty');
     td.colSpan = 3;
     tr.append(td);
     $('#history').append(tr);
@@ -238,16 +244,110 @@ async function history(ruleId) {
 
   for (const row of data) {
     const rule = row.result || rules.find(r => r.id === row.watch_rule_id);
+    if (row.result && !latestQuotes.has(row.watch_rule_id)) latestQuotes.set(row.watch_rule_id, row.result);
     const tr = node('tr', '');
     const routeText = rule ? `${getAirportLabel(rule.origin)} ➔ ${getAirportLabel(rule.destination)}` : '航班';
     const dateText = new Date(row.checked_at).toLocaleString('zh-TW', { hour12: false });
     const priceText = `NT$ ${Number(row.price).toLocaleString('zh-TW')}`;
 
     const tdRoute = node('td', routeText);
+    const provider = rule?.provider || rules.find(r => r.id === row.watch_rule_id)?.provider;
+    tdRoute.append(node('small', provider === 'google-flights' ? 'Google Flights 虎航參考價' : provider === 'tigerair' ? '舊版虎航查價' : '舊版票價紀錄', 'history-source'));
     const tdTime = node('td', dateText);
     const tdPrice = node('td', priceText, 'price-cell');
     tr.append(tdRoute, tdTime, tdPrice);
     $('#history').append(tr);
+  }
+}
+
+function stopCloudPolling() {
+  if (cloudPollTimer) clearTimeout(cloudPollTimer);
+  cloudPollTimer = null;
+}
+
+function scheduleCloudPolling() {
+  stopCloudPolling();
+  if (!user || recovery || document.hidden || ![...cloudJobs.values()].some(job => isActiveJob(job))) return;
+  if (!cloudPollStartedAt) cloudPollStartedAt = Date.now();
+  if (Date.now() - cloudPollStartedAt >= 10 * 60 * 1000) {
+    cloudJobsIssue = '已停止等候更新。查價仍可能在雲端執行，請稍後按「重新整理」查看。';
+    renderRules();
+    return;
+  }
+  const version = generation;
+  cloudPollTimer = setTimeout(async () => {
+    cloudPollTimer = null;
+    if (version !== generation || !user || document.hidden) return;
+    await refreshCloudJobs();
+    if (version !== generation || !user) return;
+    renderRules();
+    scheduleCloudPolling();
+  }, 3000);
+}
+
+async function refreshCloudJobs({ latest = false } = {}) {
+  if (!user || !rules.length) return;
+  const version = generation, request = ++cloudJobsRequest;
+  const previous = new Map(cloudJobs);
+  // Read each rule's newest result once on load, so a frequently checked route cannot
+  // hide another route's older result. Poll only known active jobs afterwards.
+  const activeIds = [...previous.values()].filter(job => isActiveJob(job)).map(job => job.id);
+  if (!latest && !activeIds.length) return;
+  const results = latest
+    ? await Promise.all(rules.map(rule => client.from('cloud_check_jobs').select('*').eq('watch_rule_id', rule.id)
+      .order('created_at', { ascending: false }).limit(1)))
+    : [await client.from('cloud_check_jobs').select('*').in('id', activeIds)];
+  if (version !== generation || request !== cloudJobsRequest || !user) return;
+  if (results.some(result => result.error || !Array.isArray(result.data))) {
+    cloudJobsIssue = '暫時讀不到雲端查價狀態，請稍後重新整理。已送出的查價請勿重複提交。';
+    return;
+  }
+  cloudJobsIssue = '';
+  const next = latest ? new Map() : new Map(previous);
+  for (const result of results) for (const job of result.data) next.set(job.watch_rule_id, job);
+  cloudJobs = next;
+  const completed = [...next.values()].some(job => !isActiveJob(job) && previous.get(job.watch_rule_id)?.id === job.id && isActiveJob(previous.get(job.watch_rule_id)));
+  if (completed) {
+    latestQuotes.clear();
+    try { await history(currentFilterRuleId); } catch { /* Existing result remains visible on a temporary history read failure. */ }
+  }
+}
+
+async function startCloudCheck(rule) {
+  const reason = checkUnavailableReason(rule, todayTaipei());
+  if (reason) { notice(reason, true); return; }
+  if (!user || dispatchingRules.size || [...cloudJobs.values()].some(job => isActiveJob(job))) return;
+  const version = generation;
+  dispatchingRules.add(rule.id);
+  renderRules();
+  try {
+    const { data, error } = await client.functions.invoke('cloud-check', { body: { ruleId: rule.id } });
+    if (version !== generation || !user) return;
+    if (error) {
+      let code = error.context?.status === 401 ? 'unauthorized' : '';
+      try { code ||= (await error.context?.json())?.error || ''; } catch { /* Never display raw gateway/provider errors. */ }
+      await refreshCloudJobs({ latest: true });
+      if (version === generation && user) notice(cloudErrorMessage(code), true);
+      return;
+    }
+    if (!data?.jobId) throw Error('invalid-response');
+    cloudJobs.set(rule.id, { id: data.jobId, watch_rule_id: rule.id, status: data.status || 'reserved',
+      expires_at: data.expiresAt || new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+      created_at: new Date().toISOString(), error_code: data.dispatch === 'rejected' ? 'cloud-start-rejected' : null });
+    cloudPollStartedAt = Date.now();
+    const remaining = Number.isInteger(data.remainingToday) ? `今天還可查 ${data.remainingToday} 次。` : '';
+    notice(data.dispatch === 'rejected' ? cloudErrorMessage('cloud-start-rejected') : data.dispatch === 'unconfirmed'
+      ? cloudErrorMessage('dispatch-uncertain') : `已送出一次雲端查價。${remaining}`, data.dispatch === 'rejected');
+  } catch {
+    if (version !== generation || !user) return;
+    await refreshCloudJobs({ latest: true });
+    if (version === generation && user) notice('暫時無法確認查價要求。請稍後重新整理查看，避免重複提交。', true);
+  } finally {
+    dispatchingRules.delete(rule.id);
+    if (version === generation && user) {
+      renderRules();
+      scheduleCloudPolling();
+    }
   }
 }
 
@@ -257,15 +357,25 @@ async function load() {
   const data = check(await client.from('watch_rules').select('*').order('created_at', { ascending: false }).limit(10));
   if (version !== generation || !user) return;
   rules = data;
+  latestQuotes.clear();
+  await refreshCloudJobs({ latest: true });
+  if (version !== generation || !user) return;
+  await history(currentFilterRuleId);
+  if (version !== generation || !user) return;
+  renderRules();
+  scheduleCloudPolling();
+}
+
+function renderRules() {
 
   $('#total').textContent = rules.length;
-  $('#active').textContent = rules.filter(r => r.enabled).length;
+  $('#active').textContent = rules.filter(r => !checkUnavailableReason(r, todayTaipei())).length;
   const countBadge = $('#list-count-badge');
-  if (countBadge) countBadge.textContent = `已監控 ${rules.length} / 10 組`;
+  if (countBadge) countBadge.textContent = `已儲存 ${rules.length} / 10 組`;
 
   $('#rules').replaceChildren();
   if (!rules.length) {
-    $('#rules').append(node('p', '還沒有監控航線。\n請填寫右側表單，立即開始追蹤您的第一段旅程！', 'empty'));
+    $('#rules').append(node('p', '還沒有行程。\n請填寫下方或右側表單並儲存，再按「立即查價」。', 'empty'));
   }
 
   for (const r of rules) {
@@ -284,7 +394,7 @@ async function load() {
     );
     titleGroup.append(routeSpan);
 
-    const badge = node('span', r.enabled ? '● 監控中' : '○ 已暫停', `badge ${r.enabled ? 'badge-active' : 'badge-paused'}`);
+    const badge = node('span', r.enabled ? '● 可查價' : '○ 已暫停', `badge ${r.enabled ? 'badge-active' : 'badge-paused'}`);
     header.append(titleGroup, badge);
 
     // Details List
@@ -320,6 +430,7 @@ async function load() {
     priceRow.append(priceIcon, node('span', priceText, r.target_price ? 'watch-target-tag' : ''));
 
     details.append(dateRow, paxRow, priceRow);
+    details.append(node('div', r.provider === 'google-flights' ? '來源：Google Flights 虎航參考價' : '來源：舊版虎航查價', 'watch-source'));
 
     // Conditions row
     const conditionsRow = node('div', '', 'watch-conditions-row');
@@ -335,6 +446,16 @@ async function load() {
 
     // Actions
     const buttons = node('div', '', 'actions');
+    const checkNow = node('button', '立即查價', 'check-now-btn');
+    checkNow.type = 'button';
+    const unavailable = checkUnavailableReason(r, todayTaipei());
+    const currentJob = cloudJobs.get(r.id);
+    const activeJob = isActiveJob(currentJob);
+    const anyActiveJob = [...cloudJobs.values()].some(job => isActiveJob(job));
+    checkNow.disabled = !!unavailable || anyActiveJob || dispatchingRules.size > 0;
+    checkNow.title = unavailable || (anyActiveJob ? '請等目前的查價完成' : '執行一次雲端查價，不會啟用排程');
+    if (activeJob || dispatchingRules.has(r.id)) checkNow.textContent = dispatchingRules.has(r.id) ? '送出中…' : '查價中…';
+    checkNow.onclick = () => startCloudCheck(r);
     const edit = node('button', '編輯', 'secondary');
     edit.type = 'button';
     edit.onclick = () => {
@@ -349,7 +470,7 @@ async function load() {
       }
       setTripType(r.return_date ? 'round' : 'oneway');
       syncDateLimits();
-      $('#editor-title').textContent = `編輯監控：${r.origin} ➔ ${r.destination}`;
+      $('#editor-title').textContent = `編輯行程：${r.origin} ➔ ${r.destination}`;
       const cancelBtn = $('#cancel-edit-btn');
       if (cancelBtn) cancelBtn.hidden = false;
       $('#reset-rule').textContent = '取消編輯';
@@ -369,43 +490,72 @@ async function load() {
       if (changed) {
         if (form.elements.id.value === r.id) form.elements.enabled.checked = !r.enabled;
         await load();
-        notice(r.enabled ? '已暫停該航線監控' : '已啟用該航線監控');
+        notice(r.enabled ? '已暫停此行程' : '已啟用此行程，可按「立即查價」；尚未開啟自動排程。');
       }
     });
 
     const remove = node('button', '刪除', 'danger');
     remove.type = 'button';
     remove.onclick = () => {
-      if (!confirm(`確定要刪除「${getAirportLabel(r.origin)} ➔ ${getAirportLabel(r.destination)}」的監控規則及其所有歷史紀錄？`)) return;
+      if (!confirm(`確定要刪除「${getAirportLabel(r.origin)} ➔ ${getAirportLabel(r.destination)}」行程及其所有歷史紀錄？`)) return;
       action(remove, async () => {
         check(await client.from('watch_rules').delete().eq('id', r.id).select('id').single());
         if (form.elements.id.value === r.id) resetRule();
         if (currentFilterRuleId === r.id) currentFilterRuleId = null;
         await load();
-        notice('已成功刪除監控規則');
+        notice('已刪除此行程');
       });
     };
 
     // Tigerair Official Booking Link
-    const bookLink = node('a', '官網查價 ↗', 'airline-link-btn');
+    const hasGoogleQuote = r.provider === 'google-flights' && !!trustedGoogleBookingUrl(latestQuotes.get(r.id));
+    const bookLink = node('a', hasGoogleQuote ? '查看參考行程 ↗' : '虎航官網查價 ↗', 'airline-link-btn');
     bookLink.href = getBookingUrl(r);
     bookLink.target = '_blank';
     bookLink.rel = 'noopener noreferrer';
-    bookLink.title = '直接前往台灣虎航官網查看此航班即時票價';
+    bookLink.title = hasGoogleQuote ? '前往這次查得的 Google Flights 公開行程，確認價格後再訂票' : '前往台灣虎航官網確認實際票價';
 
+    const checkArea = node('div', '', 'cloud-check-area');
+    checkArea.append(checkNow);
+    const presentation = dispatchingRules.has(r.id) && !activeJob
+      ? { tone: 'pending', title: '正在送出查價…', detail: '請稍候，請勿重複提交。' }
+      : jobPresentation(currentJob);
+    const outcome = node('div', '', `cloud-job-status cloud-job-${presentation.tone}`);
+    outcome.setAttribute('role', 'status');
+    outcome.append(node('strong', presentation.title), node('p', presentation.detail));
+    if (currentJob?.finished_at) outcome.append(node('small', `查詢時間：${new Date(currentJob.finished_at).toLocaleString('zh-TW', { hour12: false })}`));
+    checkArea.append(outcome);
+    if (unavailable) checkArea.append(node('p', unavailable, 'muted small'));
+    if (cloudJobsIssue) checkArea.append(node('p', cloudJobsIssue, 'cloud-status-warning'));
+    if (r.provider !== 'google-flights') {
+      const copy = node('button', '複製為新行程', 'secondary');
+      copy.type = 'button';
+      copy.onclick = () => {
+        edit.onclick();
+        form.elements.id.value = '';
+        $('#editor-title').textContent = '新增雲端行程';
+        notice('已複製行程內容。請確認日期並儲存，再按「立即查價」。');
+      };
+      checkArea.append(copy);
+    }
     buttons.append(edit, view, toggle, remove, bookLink);
     card.append(header, details);
     if (conditionsRow.children.length) card.append(conditionsRow);
-    card.append(buttons);
+    card.append(checkArea, buttons);
     $('#rules').append(card);
   }
-
-  await history(currentFilterRuleId);
 }
 
 async function showSession(session, event) {
   generation++;
   historyRequest++;
+  cloudJobsRequest++;
+  stopCloudPolling();
+  cloudPollStartedAt = 0;
+  cloudJobs = new Map();
+  latestQuotes = new Map();
+  dispatchingRules.clear();
+  cloudJobsIssue = '';
   currentFilterRuleId = null;
   user = session?.user || null;
   if (event === 'PASSWORD_RECOVERY') recovery = true;
@@ -428,7 +578,7 @@ async function showSession(session, event) {
     try {
       await load();
     } catch (e) {
-      notice('無法讀取監控：' + e.message + '。若剛完成部署，請確認管理員已執行 multi-user.sql。', true);
+      notice('暫時無法讀取行程，請重新整理。若仍無法使用，請聯絡管理員。', true);
     }
   }
 }
@@ -488,6 +638,7 @@ $('#logout').onclick = () => action($('#logout'), async () => {
 });
 
 $('#refresh').onclick = () => action($('#refresh'), async () => {
+  cloudPollStartedAt = Date.now();
   await load();
   notice('已更新最新監控與票價資料');
 });
@@ -602,16 +753,17 @@ form.onsubmit = e => {
 
     const result = id
       ? await client.from('watch_rules').update(values).eq('id', id).select('id').single()
-      : await client.from('watch_rules').insert({ ...values, user_id: user.id, provider: 'tigerair', currency: 'TWD' }).select('id').single();
+      : await client.from('watch_rules').insert({ ...values, user_id: user.id, provider: 'google-flights', currency: 'TWD' }).select('id').single();
 
     const data = check(result);
     form.elements.id.value = data.id;
-    $('#editor-title').textContent = `編輯監控：${values.origin} ➔ ${values.destination}`;
+    $('#editor-title').textContent = `編輯行程：${values.origin} ➔ ${values.destination}`;
     const cancelBtn = $('#cancel-edit-btn');
     if (cancelBtn) cancelBtn.hidden = false;
     $('#reset-rule').textContent = '取消編輯';
     await load();
-    notice('監控規則已成功儲存！背景排程將定時為您查價。');
+    [...document.querySelectorAll('.watch')].find(card => card.dataset.id === data.id)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    notice('行程已儲存。請在行程卡片按「立即查價」；儲存不會啟動排程或寄信。');
   });
 };
 
@@ -619,3 +771,16 @@ client.auth.getSession().then(({ data, error }) => {
   if (error) notice(error.message, true);
   else if (!location.hash.includes('type=recovery')) showSession(data.session);
 });
+
+document.addEventListener('visibilitychange', () => {
+  stopCloudPolling();
+  if (!document.hidden && user && !recovery) {
+    const version = generation;
+    refreshCloudJobs({ latest: true }).then(() => {
+      if (version !== generation || !user) return;
+      renderRules();
+      scheduleCloudPolling();
+    }).catch(() => {});
+  }
+});
+window.addEventListener('pagehide', stopCloudPolling);

@@ -2,8 +2,9 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const email = process.env.TEST_USER_EMAIL || 'wmh6227@gmail.com';
-const password = process.env.TEST_USER_PASSWORD || 'V9!rK4#mT8@qN2$xP7';
+const email = process.env.TEST_USER_EMAIL;
+const password = process.env.TEST_USER_PASSWORD;
+if (!email || !password) throw new Error('Set TEST_USER_EMAIL and TEST_USER_PASSWORD explicitly; no real account defaults are included.');
 const siteUrl = process.env.SITE_URL || 'https://wuharry.github.io/Flight-Price-Monitor/';
 const artifactDir = resolve('artifacts/user-test');
 

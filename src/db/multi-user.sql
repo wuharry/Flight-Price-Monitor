@@ -10,7 +10,7 @@ begin
     if tg_op = 'UPDATE' and new.user_id is distinct from old.user_id then
       raise exception 'Rule ownership cannot be changed';
     end if;
-    if new.provider <> 'tigerair' or new.currency <> 'TWD' or
+    if new.provider not in ('tigerair', 'google-flights') or new.currency <> 'TWD' or
        new.origin !~ '^[A-Z]{3}$' or new.destination !~ '^[A-Z]{3}$' or new.origin = new.destination or
        new.adults not between 1 and 9 or new.new_low_days not between 1 and 365 or
        (new.return_date is not null and new.return_date < new.departure_date) or

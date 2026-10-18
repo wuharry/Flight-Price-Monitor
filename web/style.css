@@ -29,6 +29,34 @@
   --radius-lg: 16px;
 }
 
+.manual-mode-banner {
+  background: #fff8e7;
+  border: 1px solid #ead59f;
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  color: #624b19;
+}
+
+.manual-mode-banner p { margin: 5px 0 0; font-size: 14px; }
+.cloud-check-area { display: grid; gap: 10px; margin: 16px 0; }
+.cloud-check-area p { margin: 0; }
+.check-now-btn { width: 100%; min-height: 48px; font-size: 16px; }
+.cloud-job-status { border-radius: var(--radius-sm); padding: 12px 14px; background: var(--bg-subtle); }
+.cloud-job-status strong { display: block; font-size: 15px; }
+.cloud-job-status p { margin: 4px 0; font-size: 13px; line-height: 1.6; }
+.cloud-job-status small { color: var(--text-muted); }
+.cloud-job-pending { background: #eaf2ff; border-left: 3px solid #497fbd; }
+.cloud-job-success { background: var(--primary-light); border-left: 3px solid var(--primary); }
+.cloud-job-error { background: #fff2eb; border-left: 3px solid var(--accent); }
+.cloud-status-warning { font-size: 13px; color: #805a13; }
+.history-source { display: block; margin-top: 4px; color: var(--text-muted); font-size: 12px; font-weight: 400; }
+.watch-source { font-size: 12px; }
+
+button, .airline-link-btn { min-height: 44px; }
+input:not([type="checkbox"]), select { min-height: 44px; }
+.airport-chip-btn, .duration-chip-btn { min-height: 36px; }
+
 * {
   box-sizing: border-box;
 }
@@ -1161,4 +1189,12 @@ footer {
     width: 100%;
     justify-content: space-between;
   }
+}
+
+@media (max-width: 600px) {
+  .manual-mode-banner { padding: 14px; }
+  .manual-mode-banner p { font-size: 13px; }
+  .watch .actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .watch .airline-link-btn { grid-column: 1 / -1; text-align: center; justify-content: center; }
+  .cloud-job-status p { font-size: 14px; }
 }

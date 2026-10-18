@@ -1,0 +1,4 @@
+# The browser sends its user JWT in Authorization and a publishable key in apikey.
+# Keep gateway JWT verification and also revalidate the current user in the handler.
+[functions.cloud-check]
+verify_jwt = true

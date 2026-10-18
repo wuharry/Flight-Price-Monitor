@@ -7,6 +7,7 @@ import { notifyDesktop, openUrl } from './services/desktop-notify.js';
 import { startAdmin } from './admin/server.js';
 import { PriceService } from './services/price.service.js';
 import { TigerairProvider } from './providers/tigerair.js';
+import { GoogleFlightsProvider } from './providers/google-flights.js';
 import { getSupabaseClient } from './db/supabase.js';
 
 async function main() {
@@ -37,7 +38,8 @@ async function main() {
       return outcome;
     },
   };
-  const service = new PriceService(repository, notifier, [new TigerairProvider()], config.EMAIL_MODE === 'send');
+  const service = new PriceService(repository, notifier,
+    [new TigerairProvider(), new GoogleFlightsProvider()], config.EMAIL_MODE === 'send');
   const stop = new AbortController();
   const signal = () => stop.abort();
   process.once('SIGINT', signal);

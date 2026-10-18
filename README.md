@@ -1,10 +1,12 @@
 # Flight Price Monitor
 
+雲端單次查價可改用 Google Flights 的虎航航空公司參考價，部署到 Apify Free：[Apify 操作說明](docs/APIFY.md)。支援手動查價、查價後寄測試信及單次門檻監控，不會自動建立排程。`pnpm build:apify` 產生只包含必要程式的部署目錄，不打包 `.env` 或本機資料。
+
 少量通知可使用 Gmail SMTP，無需購買寄信網域：[Gmail 設定與更新 Cloud Run](docs/GMAIL.md)。
 
 多人網站：GitHub Pages 提供註冊、登入、個人監控與歷史票價；Supabase RLS 隔離資料。部署步驟見 [GitHub 網站部署](docs/GITHUB-WEBSITE.md)。本機管理工具見 [管理介面](docs/ADMIN.md)。
 
-TypeScript 機票價格監控器。目前以 Playwright 開啟台灣虎航的正常訂票頁，讀取官方頁面自己的 GraphQL 票價回應。已移除固定模擬票價；查不到、售完、驗證失敗或資料格式改變時回報失敗，不寫入假價格。
+TypeScript 機票價格監控器。`google-flights` 來源透過公開介面選取虎航直飛行程，讀取虎航航空公司賣方的含稅參考總價；不提供稅費拆分或 tigerLight 驗證，Google 資料可能延遲最多 24 小時。原有 `tigerair` 來源仍以 Playwright 開啟台灣虎航的正常訂票頁，讀取官方頁面自己的 GraphQL 票價回應。兩種來源的歷史分開比較。查不到、售完、驗證失敗或資料格式改變時回報失敗，不寫入假價格。
 
 - 監控直飛 tigerLight：全部成人、去回程未稅價與稅費分開保存。未含付款手續費、加購行李、餐點、選位。
 - 價格達標、近 30 日新低、約 24 小時跌幅金額／比例。首次觀測不當成新低。

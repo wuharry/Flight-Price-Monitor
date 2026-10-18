@@ -24,7 +24,7 @@ try {
    if(req.method()==='POST'){const b=req.postDataJSON();rules.push({...b,id:'20000000-0000-4000-8000-000000000002',created_at:new Date().toISOString()});data={id:rules[0].id};}
    else if(req.method()==='PATCH'){Object.assign(rules[0],req.postDataJSON());data={id:rules[0].id};}
    else data=rules;
-  } else if(url.pathname==='/rest/v1/price_history')data=[];
+  } else if(url.pathname==='/rest/v1/price_history' || url.pathname==='/rest/v1/cloud_check_jobs')data=[];
   await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(data)});
  });
  await page.goto('http://127.0.0.1:'+server.address().port+'/');
@@ -32,7 +32,7 @@ try {
  await page.locator('#login-email').fill(user.email);await page.locator('#login-password').fill('test-password-only');await page.locator('#login').click();
  await page.locator('#dashboard').waitFor({state:'visible'});
  await page.locator('[name=departure_date]').fill('2027-02-10');await page.locator('[name=target_price]').fill('6500');
- await page.getByRole('button',{name:'儲存監控',exact:true}).click();
+ await page.getByRole('button',{name:'儲存行程',exact:true}).click();
  assert.equal(rules.length,0,'Round trips require a return date');
  await page.locator('.duration-chip-btn[data-days="4"]').click();
  assert.equal(await page.locator('[name=return_date]').inputValue(),'2027-02-14');
@@ -42,8 +42,9 @@ try {
  await page.locator('#btn-trip-round').click();
  await page.locator('.duration-chip-btn[data-days="4"]').click();
  await page.locator('[name=adults]').fill('2');
- await page.getByRole('button',{name:'儲存監控',exact:true}).click();await page.locator('.watch').waitFor();
+ await page.getByRole('button',{name:'儲存行程',exact:true}).click();await page.locator('.watch').waitFor();
  assert.equal(rules[0].user_id,user.id);
+ assert.equal(rules[0].provider,'google-flights');
  const booking=new URL(await page.locator('.airline-link-btn').getAttribute('href'));
  assert.equal(booking.searchParams.get('returnDate'),'2027-02-14');
  assert.equal(booking.searchParams.get('adult'),'2');
@@ -57,7 +58,7 @@ try {
  assert.equal(await page.locator('[name=enabled]').isChecked(),false,'Card toggle must update the edited form');
  await Promise.all([
   page.waitForResponse(res=>res.request().method()==='GET' && res.url().includes('/price_history')),
-  page.getByRole('button',{name:'儲存監控',exact:true}).click(),
+  page.getByRole('button',{name:'儲存行程',exact:true}).click(),
  ]);
  assert.equal(rules[0].enabled,false,'Saving must preserve paused state');
  await page.screenshot({path:'artifacts/website/dashboard.png',fullPage:true});
