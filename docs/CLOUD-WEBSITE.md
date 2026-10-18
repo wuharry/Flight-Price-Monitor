@@ -41,8 +41,19 @@ Actor 固定 1 GB、180 秒上限。按目前 Free 計價，跑滿 180 秒的運
 
 ### 目前驗證狀態
 
-截至 2026-10-18（Asia/Taipei），已恢復原 Supabase 專案的管理存取權，確認其組織為 Free，完成三份資料庫遷移及 `cloud-check` Edge Function 部署。沒有改用其他資料庫，也沒有建立排程或新增付費方案。
+2026-10-19（Asia/Taipei）已獲使用者授權保留跨服務 Secret。專用 Apify API token 僅授予指定私人 Actor 的 **Read／Run**，採 Restricted access；未授予帳戶全面權限、Full-permission Actors 權限或儲存空間查詢權限。Runtime 憑證加密保存，不套用到 build。
 
-Google Flights 在 Apify 的真實查價與 Gmail 寄件服務接受已完成，見 [實測紀錄](APIFY-TEST-RESULTS.md)。支援網站工作的新版 Actor 原始碼已上傳，但尚未建置；新增跨服務 Secret 的儲存授權、設定及正式網站完整流程驗證仍待完成。這些前提完成前，不能將網站串接視為已上線，亦未宣稱收件匣送達。
+原 Supabase Free 專案已完成三份資料庫遷移。支援網站工作的 Actor **0.0.12** 建置成功，`cloud-check` Edge Function 依同版原始碼部署，平台 JWT 驗證維持開啟；GitHub Pages 正式網站部署成功。
 
-2026-10-18 本次程式驗證：97 項核心／SQL／權限測試、5 項網站邏輯測試通過；型別檢查、Actor 打包與差異檢查通過。Chrome 本機模擬操作完成登入、建立 Google Flights 行程、單次查價、執行期間按鈕停用、票價與預覽狀態呈現、重載恢復結果、停用行程阻止查價、登出清除資料。手機寬度 390px 測試無橫向溢出，沒有瀏覽器警告或錯誤。這些網站操作使用虛構資料，不呼叫 Apify、不寄信；畫面留存於 `artifacts/website-cloud/`。
+已從正式網站完成一次真實流程：
+
+- 以指定收件人的已驗證網站帳號登入，新增獨立測試行程：TPE → NRT、2027-02-10～2027-02-16、1 位成人，臨時測試目標總價 TWD 50,000。
+- 只按一次「立即查價」，取得 Google Flights 虎航含稅參考總價 **TWD 16,088**。整個 Actor run 為 32 秒（含啟動），資料庫 claim 到 finish 約 13 秒；工作狀態 `succeeded`、`email_status=accepted`。
+- 保存 1 筆票價歷史與 1 筆 `below_target` 通知，通知已標記 `sent`。重新載入網站後，結果仍保持。
+- 測試規則已停用，原有 5 筆規則逐欄比對完全未改。本次只建立 1 個雲端工作，沒有重送。
+
+**上述 `accepted`／`sent` 僅代表 Gmail SMTP 接受，叔叔的收件匣送達仍待確認。** 較早的獨立 Actor 查價與寄信測試見 [實測紀錄](APIFY-TEST-RESULTS.md)。本次公開驗證紀錄省略真實信箱、使用者／工作／執行／Actor 識別碼及憑證。
+
+GitHub `MONITOR_ENABLED` 變數仍未設定，沒有開啟自動排程。本次 run 使用 1 GB，Apify 主控台顯示成本 **US$0.002**，從免費額度扣除；當時帳期 Free 用量為 **US$0.07／5.00**，剩餘 **US$4.93**。這些是本次觀察，不能當作未來每次的固定價格或收費保證；上方保留的預算數字也只是運算估算。
+
+上線前的 2026-10-18 程式驗證：97 項核心／SQL／權限測試、5 項網站邏輯測試通過；型別檢查、Actor 打包與差異檢查通過。Chrome 本機模擬操作完成登入、建立 Google Flights 行程、單次查價、執行期間按鈕停用、票價與預覽狀態呈現、重載恢復結果、停用行程阻止查價、登出清除資料。手機寬度 390px 測試無橫向溢出，沒有瀏覽器警告或錯誤。這些本機網站操作使用虛構資料，不呼叫 Apify、不寄信；畫面留存於 `artifacts/website-cloud/`，與上述正式實測分開記錄。

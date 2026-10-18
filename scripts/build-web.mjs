@@ -13,5 +13,6 @@ await mkdir('web-dist', { recursive: true });
 await build({ entryPoints: ['web/app.js'], bundle: true, minify: true, format: 'esm', platform: 'browser', target: 'es2022', outfile: 'web-dist/app.js', define: { __SUPABASE_URL__: JSON.stringify(url), __SUPABASE_KEY__: JSON.stringify(key) } });
 await copyFile('web/index.html', 'web-dist/index.html');
 await copyFile('web/style.css', 'web-dist/style.css');
+await copyFile('web/flight-monitor-guide.pdf', 'web-dist/flight-monitor-guide.pdf');
 await writeFile('web-dist/.nojekyll', '');
 console.log('Website built in web-dist (public credentials only).');
