@@ -35,8 +35,9 @@ Actor 固定 1 GB、180 秒上限。按目前 Free 計價，跑滿 180 秒的運
 3. 部署 `supabase/functions/cloud-check`，保留平台 JWT 驗證及函式內的 `auth.getUser()` 驗證。設定後端 `CLOUD_CHECK_ALLOWED_ORIGINS`（網站 origin，逗號分隔）及 `CLOUD_CHECK_ALLOWED_EMAILS`（已驗證帳號信箱，逗號分隔）；名單預設空白，不允許任何帳號啟動查價，初始僅加入叔叔及管理員。
 4. 將僅供私人 Actor 的 Apify token 存入 Supabase Edge Secret `APIFY_CLOUD_CHECK_TOKEN`；以 `APIFY_CLOUD_CHECK_ACTOR_ID`、`APIFY_CLOUD_CHECK_BUILD` 固定本次 Actor 與建置版本。將正確的 `SUPABASE_URL` 及 `SUPABASE_SERVICE_ROLE_KEY` 存入私人 Apify Actor Runtime Secret。這是新的跨服務存取權，必須由帳號持有人確認後才儲存。不要整份上傳 `.env`。
 5. 用 `pnpm build:apify` 產生白名單部署檔，更新 Actor；保留固定記憶體與逾時，不建立排程。Edge 設定應指向本次驗證完成的 Actor build。
-6. 網站建置只使用該 Supabase 專案的 URL 與 publishable／anon 公開金鑰。驗證 Email 登入／註冊可用，再發送網站連結給叔叔。
-7. 從網站測試一個真實條件，確認只有該使用者的規則被查價、結果回寫、狀態可在重開網頁後恢復；另由收件人確認實際收信，才能記為送達驗證完成。
+6. 網站建置只使用該 Supabase 專案的 URL 與 publishable／anon 公開金鑰。
+7. 在 Supabase → Authentication → URL Configuration，把 **Site URL** 設為正式 GitHub Pages 完整網址，並在 **Redirect URLs** 加入同一網址，例如 `https://wuharry.github.io/Flight-Price-Monitor/`。必須包含專案路徑與結尾 `/`，不能只填網域；若正式 deployment URL 不同，兩處都改用實際完整網址。這個網址用於註冊驗證及重設密碼返回網站。確認 Email provider、信箱驗證及驗證信投遞可用，實測登入／註冊後再發送連結給叔叔。
+8. 從網站測試一個真實條件，確認只有該使用者的規則被查價、結果回寫、狀態可在重開網頁後恢復；另由收件人確認實際收信，才能記為送達驗證完成。
 
 ### 目前驗證狀態
 
