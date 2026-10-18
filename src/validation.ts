@@ -31,10 +31,12 @@ export const watchRuleSchema = z.object({
   enabled: z.boolean().default(true),
 }).refine(validRoute, 'Invalid route or return date');
 export const priceBasis = 'tigerLight-including-tax-excluding-payment-and-extras-v1' as const;
-export function searchKey(input: FlightSearch & { provider: string }): string {
+export const googleFlightsPriceBasis = 'google-flights-tigerair-reference-including-tax-v1' as const;
+export function searchKey(input: FlightSearch & { provider: string; priceBasis?: string }): string {
   return createHash('sha256').update(JSON.stringify([
     input.provider, input.origin, input.destination, input.departureDate,
-    input.returnDate ?? null, input.adults, input.currency, priceBasis,
+    input.returnDate ?? null, input.adults, input.currency,
+    input.priceBasis ?? (input.provider === 'google-flights' ? googleFlightsPriceBasis : priceBasis),
   ])).digest('hex');
 }
 export function todayTaipei(now = new Date()): string {

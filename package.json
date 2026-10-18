@@ -10,18 +10,21 @@
   "type": "module",
   "scripts": {
     "build:web": "node scripts/build-web.mjs",
+    "build:edge": "node scripts/build-edge.mjs",
     "admin": "tsx src/admin/server.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/src/index.js",
     "monitor": "node dist/src/index.js --run-once",
-    "test": "pnpm build && node --test dist/tests/*.test.js",
+    "test": "pnpm build && node --test dist/tests/*.test.js && node scripts/test-cloud-check-ui.mjs",
+    "test:ui-logic": "node scripts/test-cloud-check-ui.mjs",
     "test:browser": "tsx scripts/test-browser.ts",
     "test:user-flow": "node scripts/test-user-flow.mjs",
     "test:gmail": "tsx scripts/test-gmail.ts",
     "check-types": "tsc --noEmit",
     "build:exe": "pnpm check-types && node scripts/build-exe.mjs",
     "inspect:tigerair": "tsx scripts/inspect-tigerair.ts",
-    "build": "tsc && node scripts/copy-admin.mjs"
+    "build": "tsc && node scripts/copy-admin.mjs",
+    "build:apify": "pnpm check-types && node scripts/build-apify.mjs"
   },
   "keywords": [
     "flight-monitor",
@@ -34,6 +37,7 @@
   "license": "MIT",
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
+    "apify": "^3.7.2",
     "dotenv": "^16.4.7",
     "nodemailer": "^10.0.10",
     "playwright-core": "1.63.0",

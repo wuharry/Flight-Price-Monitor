@@ -16,7 +16,7 @@ export interface FlightLeg {
   tax: number;
   total: number;
 }
-export interface FlightPriceResult extends FlightSearch {
+export interface TigerairPriceResult extends FlightSearch {
   provider: string;
   outboundPrice: number;
   inboundPrice?: number;
@@ -27,6 +27,41 @@ export interface FlightPriceResult extends FlightSearch {
   priceBasis: 'tigerLight-including-tax-excluding-payment-and-extras-v1';
   legs: FlightLeg[];
 }
+export interface GoogleFlightsLeg {
+  origin: string;
+  destination: string;
+  requestedDate: string;
+  displayedDate: string;
+  departureTimeLabel: string;
+  arrivalTimeLabel: string;
+  departureTime: null;
+  arrivalTime: null;
+  flightNumber: string | null;
+  fare: null;
+  tax: null;
+  total: null;
+}
+export interface GoogleFlightsPriceResult extends FlightSearch {
+  provider: 'google-flights';
+  outboundPrice: null;
+  inboundPrice?: null;
+  taxAndFees: null;
+  totalPrice: number;
+  checkedAt: string;
+  bookingUrl: string;
+  priceBasis: 'google-flights-tigerair-reference-including-tax-v1';
+  legs: GoogleFlightsLeg[];
+  reference: {
+    source: 'google-flights';
+    seller: 'Tigerair Taiwan';
+    taxInclusive: true;
+    fareFamily: null;
+    yearVerifiedFromDom: false;
+    sourceDataMaxAgeHours: 24;
+    selectedItineraryOnly: true;
+  };
+}
+export type FlightPriceResult = TigerairPriceResult | GoogleFlightsPriceResult;
 export type AlertType = 'below_target' | 'new_low' | 'drop_amount' | 'drop_percent';
 export interface WatchRule extends FlightSearch {
   userId?: string;

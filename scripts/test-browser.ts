@@ -18,6 +18,9 @@ const provider = new TigerairProvider({
     await writeFile(`${directory}/failure.txt`, error.message + '\n' + await page.locator('body').innerText());
   },
   onResult: async (page, result) => {
+    if (result.priceBasis !== 'tigerLight-including-tax-excluding-payment-and-extras-v1') {
+      throw new Error('Tigerair browser test received a different price source');
+    }
     await page.getByText('選擇航班', { exact: true }).first().waitFor({ timeout: 15000 });
     const accept = page.getByRole('button', { name: '接受', exact: true });
     if (await accept.isVisible()) await accept.click();

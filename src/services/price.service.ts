@@ -34,10 +34,10 @@ export class PriceService {
     // Persist the quote and notification together before any external side effect.
     await this.repository.recordCheck(record, this.sendMode ? alert : undefined);
     if (alert && !this.sendMode) await this.email.send(alert);
-    console.log(`[Price] ${rule.id}: TWD ${result.totalPrice}; tax/fees ${result.taxAndFees}; ${result.legs.map(leg => leg.flightNumber).join(' / ')}`);
+    console.log(`[Price] ${rule.id}: TWD ${result.totalPrice}; source ${result.provider}; tax/fees ${result.taxAndFees ?? 'not itemized'}; ${result.legs.map(leg => leg.flightNumber ?? `${leg.origin}-${leg.destination}`).join(' / ')}`);
     return result;
   }
-  private async flushAlerts(rules: WatchRule[]) {
+  private async flushAlerts(rules: WatchRule[], attempts: Map<string, 'attempted' | 'accepted'>) {
     if (!this.sendMode) return 0;
     let failed = 0;
     for (const alert of await this.repository.getPendingAlerts()) {
@@ -50,8 +50,19 @@ export class PriceService {
           console.warn(`[Alert expired] ${alert.id}: too old, disabled, or search conditions changed`);
           continue;
         }
+        // A submission failure can mean the server accepted the message but its response was lost.
+        // Never retry that external side effect during the second flush of the same run.
+        const attempt = attempts.get(alert.id);
+        if (attempt) {
+          if (attempt === 'accepted') await this.repository.markAlert(alert.id, 'sent');
+          continue;
+        }
+        attempts.set(alert.id, 'attempted');
         // Resolve recipient from the current rule, never stale ownership in an outbox payload.
-        if (await this.email.send({ ...alert, payload: { ...alert.payload, rule } }) === 'sent') await this.repository.markAlert(alert.id, 'sent');
+        if (await this.email.send({ ...alert, payload: { ...alert.payload, rule } }) === 'sent') {
+          attempts.set(alert.id, 'accepted');
+          await this.repository.markAlert(alert.id, 'sent');
+        }
       } catch (error) { failed++; console.error('[Alert failed]', (error as Error).message); }
     }
     return failed;
@@ -67,12 +78,13 @@ export class PriceService {
     }, 15 * 60000);
     deadline.unref();
     const summary = { checked: 0, skipped: 0, failed: 0 };
+    const attempts = new Map<string, 'attempted' | 'accepted'>();
     try {
       console.log('[Progress] Lock acquired; reading enabled rules');
       const rules = await this.repository.getActiveRules();
       console.log(`[Progress] Loaded ${rules.length} enabled rules`);
       if (!rules.length) console.log('[Monitor] No enabled watch rules');
-      summary.failed += await this.flushAlerts(rules);
+      summary.failed += await this.flushAlerts(rules, attempts);
       const blockedProviders = new Set<string>();
       for (const rule of rules) {
         if (blockedProviders.has(rule.provider)) {
@@ -88,7 +100,7 @@ export class PriceService {
           if (error instanceof ProviderAccessDeniedError) blockedProviders.add(rule.provider);
         }
       }
-      summary.failed += await this.flushAlerts(rules);
+      summary.failed += await this.flushAlerts(rules, attempts);
       return summary;
     } finally {
       clearTimeout(deadline);
