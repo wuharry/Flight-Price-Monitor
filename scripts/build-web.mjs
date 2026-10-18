@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
-import { mkdir, copyFile, writeFile } from 'node:fs/promises';
+import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 const url = process.env.SUPABASE_URL || 'https://dejudisyuvkdkshnykog.supabase.co';
 const key = process.env.SUPABASE_PUBLISHABLE_KEY || '';
 if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/.test(url)) throw new Error('Invalid SUPABASE_URL');
@@ -10,8 +11,17 @@ if (!key.startsWith('sb_publishable_')) {
   if (role !== 'anon') throw new Error('Only a publishable or anon key may be included in the website');
 }
 await mkdir('web-dist', { recursive: true });
-await build({ entryPoints: ['web/app.js'], bundle: true, minify: true, format: 'esm', platform: 'browser', target: 'es2022', outfile: 'web-dist/app.js', define: { __SUPABASE_URL__: JSON.stringify(url), __SUPABASE_KEY__: JSON.stringify(key) } });
-await copyFile('web/index.html', 'web-dist/index.html');
+const bundle = await build({ entryPoints: ['web/app.js'], bundle: true, minify: true, format: 'esm', platform: 'browser', target: 'es2022', write: false, define: { __SUPABASE_URL__: JSON.stringify(url), __SUPABASE_KEY__: JSON.stringify(key) } });
+const content = bundle.outputFiles[0].contents;
+const digest = bytes => createHash('sha256').update(bytes).digest('hex').slice(0, 16);
+const scriptName = `app.${digest(content)}.js`;
+await writeFile(`web-dist/${scriptName}`, content);
+await writeFile('web-dist/app.js', content);
+const guideVersion = digest(await readFile('web/flight-monitor-guide.pdf'));
+const html = (await readFile('web/index.html', 'utf8'))
+  .replace('src="./app.js"', `src="./${scriptName}"`)
+  .replace('href="./flight-monitor-guide.pdf"', `href="./flight-monitor-guide.pdf?v=${guideVersion}"`);
+await writeFile('web-dist/index.html', html);
 await copyFile('web/style.css', 'web-dist/style.css');
 await copyFile('web/flight-monitor-guide.pdf', 'web-dist/flight-monitor-guide.pdf');
 await writeFile('web-dist/.nojekyll', '');
