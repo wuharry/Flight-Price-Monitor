@@ -84,6 +84,16 @@ test('server error codes get useful messages while arbitrary text is never refle
   assert.equal(cloudErrorMessage('secret password example').includes('password'), false);
 });
 
+test('a missing Google reference quote explains the unchanged itinerary and makes no claim about flight existence or old outbox mail', () => {
+  const job = { status: 'failed', error_code: 'no-matching-itinerary', email_status: 'not-triggered' };
+  const view = jobPresentation(job, now);
+  assert.equal(view.tone, 'error');
+  assert.match(view.detail, /Google Flights 目前找不到指定日期／條件的虎航直飛報價/);
+  assert.match(view.detail, /未取得或記錄票價/);
+  assert.match(view.detail, /未依此次報價產生新的通知/);
+  assert.doesNotMatch(view.detail, /確定沒有航班|完全不會寄信|沒有寄信/);
+});
+
 test('only a Google Flights quote can link to the exact public Google host and flights path', () => {
   const quote = { provider: 'google-flights', bookingUrl: 'https://www.google.com/travel/flights/search?tfs=public' };
   assert.equal(trustedGoogleBookingUrl(quote), quote.bookingUrl);

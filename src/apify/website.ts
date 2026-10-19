@@ -11,7 +11,7 @@ export interface WebsiteCompletion {
   totalPrice?: number;
   currency?: 'TWD';
   emailStatus: 'accepted' | 'preview' | 'not-triggered';
-  errorCode?: 'worker-failed' | 'query-or-notification-failed' | 'invalid-rule';
+  errorCode?: 'worker-failed' | 'query-or-notification-failed' | 'invalid-rule' | 'no-matching-itinerary';
 }
 export interface WebsiteJobs {
   claim(jobId: string, runId: string): Promise<WebsiteClaim>;

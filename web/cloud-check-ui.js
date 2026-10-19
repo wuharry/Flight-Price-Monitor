@@ -69,6 +69,7 @@ export function cloudErrorMessage(code) {
     'dispatch-uncertain': '已送出查價要求，正在確認啟動狀態。請勿重複點擊。',
     'worker-failed': '這次查價未完成，請稍後再試。',
     'query-or-notification-failed': '查價或通知未完成，請查看票價紀錄，稍後再試。',
+    'no-matching-itinerary': 'Google Flights 目前找不到指定日期／條件的虎航直飛報價；可稍後再查或自行調整日期。本次未取得或記錄票價，也未依此次報價產生新的通知。',
     'invalid-rule': '此行程無法查價，請確認日期與機場後重新儲存。',
     'expired': '這次查價等候逾時，尚未確認完成。請重新整理查看。',
   };

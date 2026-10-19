@@ -8,6 +8,7 @@ import { SupabaseWebsiteJobs, type ScheduledReservation, type ScheduledWebsiteJo
 import { PriceRepository } from '../src/db/price.repository.js';
 import type { AlertRecord, GoogleFlightsPriceResult, MonitorRepository, PriceHistory } from '../src/types/index.js';
 import { googleFlightsPriceBasis, watchRuleSchema } from '../src/validation.js';
+import { NoMatchingItineraryError } from '../src/providers/no-matching-itinerary.js';
 
 const input = { action: 'scheduled-check', provider: 'google-flights' };
 const userId = '11111111-1111-4111-8111-111111111111';
@@ -104,6 +105,18 @@ test('failed scheduled quote does not select a second rule or claim a successful
   assert.equal(output.quote, undefined); assert.equal(output.email.status, 'not-triggered');
   assert.deepEqual(f.counts, { reservations: 1, claims: 1, queries: 1, mailConstructors: 1, sends: 0, finishes: 1 });
   assert.deepEqual(f.completions, [{ status: 'failed', emailStatus: 'not-triggered', errorCode: 'query-or-notification-failed' }]);
+});
+
+test('scheduled no-matching-itinerary consumes one attempt and reports the specific failure without recording price or a new alert', async () => {
+  const f = fixture();
+  f.deps.provider.search = async actual => { f.counts.queries++; assert.equal(actual.departureDate, search.departureDate);
+    assert.equal(actual.returnDate, search.returnDate); throw new NoMatchingItineraryError('google-flights'); };
+  const output = await runActorInput(input, f.deps);
+  assert.equal(output.status, 'FAILED'); assert.deepEqual(output.scheduled, { status: 'failed' });
+  assert.equal(output.quote, undefined); assert.equal(output.email.status, 'not-triggered');
+  assert.deepEqual(f.counts, { reservations: 1, claims: 1, queries: 1, mailConstructors: 1, sends: 0, finishes: 1 });
+  assert.equal(f.history.length, 0); assert.equal(f.alerts.length, 0);
+  assert.deepEqual(f.completions, [{ status: 'failed', emailStatus: 'not-triggered', errorCode: 'no-matching-itinerary' }]);
 });
 
 test('lost scheduled reservation, claim or finish response never repeats selection, quote or SMTP', async () => {

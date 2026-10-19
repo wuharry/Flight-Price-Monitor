@@ -8,6 +8,7 @@ import { actorInputSchema, runActorInput, type ActorDependencies, type ActorEmai
 import { SupabaseWebsiteJobs, type WebsiteClaim, type WebsiteCompletion, type WebsiteJobs } from '../src/apify/website.js';
 import type { AlertRecord, GoogleFlightsPriceResult, MonitorRepository, PriceHistory } from '../src/types/index.js';
 import { googleFlightsPriceBasis, searchKey, watchRuleSchema } from '../src/validation.js';
+import { NoMatchingItineraryError } from '../src/providers/no-matching-itinerary.js';
 
 const userId = '11111111-1111-4111-8111-111111111111';
 const ruleId = '22222222-2222-4222-8222-222222222222';
@@ -92,6 +93,18 @@ test('failed website query records a sanitized failed job without a false quote 
   assert.equal(output.status, 'FAILED'); assert.equal(output.quote, undefined);
   assert.equal(f.counts().sends, 0); assert.equal(f.repository.history.length, 0);
   assert.deepEqual(f.completions, [{ status: 'failed', emailStatus: 'not-triggered', errorCode: 'query-or-notification-failed' }]);
+});
+
+test('website no-matching-itinerary classification records a specific failed job without a price, new alert or date substitution', async () => {
+  const f = fixture(); let queries = 0;
+  f.deps.provider = { name: 'google-flights', search: async actual => {
+    queries++; assert.equal(actual.departureDate, search.departureDate); assert.equal(actual.returnDate, search.returnDate);
+    throw new NoMatchingItineraryError('google-flights');
+  } };
+  const output = await runActorInput({ action: 'website-check', jobId }, f.deps);
+  assert.equal(output.status, 'FAILED'); assert.equal(output.quote, undefined); assert.equal(output.email.status, 'not-triggered');
+  assert.equal(queries, 1); assert.equal(f.counts().sends, 0); assert.equal(f.repository.history.length, 0); assert.equal(f.repository.alerts.length, 0);
+  assert.deepEqual(f.completions, [{ status: 'failed', emailStatus: 'not-triggered', errorCode: 'no-matching-itinerary' }]);
 });
 
 test('lost completion response never repeats a website query, mail, or finish', async () => {

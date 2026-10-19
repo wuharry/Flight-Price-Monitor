@@ -7,6 +7,7 @@ import type { EmailReceipt, NotificationSender } from '../services/email.service
 import { PriceService } from '../services/price.service.js';
 import { googleFlightsPriceBasis, searchKey, searchSchema, todayTaipei, watchRuleSchema } from '../validation.js';
 import type { ScheduledNoopStatus, ScheduledWebsiteJobs, WebsiteJobs } from './website.js';
+import { NoMatchingItineraryError } from '../providers/no-matching-itinerary.js';
 
 const googleRule = z.preprocess(value => value && typeof value === 'object' ?
   { provider: 'google-flights', ...value } : value, watchRuleSchema).refine(rule =>
@@ -98,12 +99,16 @@ export async function runActorInput(raw: unknown, dependencies: ActorDependencie
     }
     const claim = await jobs.claim(jobId!, dependencies.runId);
     let finished = false;
+    let noMatchingItinerary = false;
     let quote: FlightPriceResult | undefined;
     let email: ActorEmail | undefined;
     try {
       email = dependencies.createEmail(options, alert => jobs.recipient(claim, alert));
       const provider: FlightProvider = { name: dependencies.provider.name,
-        search: async search => quote = verifyQuote(await dependencies.provider.search(search), search) };
+        search: async search => {
+          try { return quote = verifyQuote(await dependencies.provider.search(search), search); }
+          catch (error) { noMatchingItinerary = error instanceof NoMatchingItineraryError; throw error; }
+        } };
       const summary = await new PriceService(jobs.repository(claim), email, [provider], options.EMAIL_MODE === 'send').runAllActiveRules();
       const emailStatus = email.lastReceipt ? 'accepted' : options.EMAIL_MODE === 'send' ? 'not-triggered' : 'preview';
       const succeeded = summary.checked === 1 && summary.failed === 0 && summary.skipped === 0;
@@ -111,7 +116,7 @@ export async function runActorInput(raw: unknown, dependencies: ActorDependencie
       finished = true;
       await jobs.finish(claim, { status: succeeded ? 'succeeded' : 'failed',
         ...(quote ? { totalPrice: quote.totalPrice, currency: quote.currency } : {}), emailStatus,
-        ...(!succeeded ? { errorCode: 'query-or-notification-failed' as const } : {}) });
+        ...(!succeeded ? { errorCode: noMatchingItinerary ? 'no-matching-itinerary' as const : 'query-or-notification-failed' as const } : {}) });
       return { ...base, status: succeeded ? 'SUCCEEDED' : 'FAILED', quote,
         job: { id: claim.id, status: succeeded ? 'succeeded' : 'failed' }, monitor: summary,
         ...(scheduled ? { scheduled: { status: succeeded ? 'checked' as const : 'failed' as const } } : {}),

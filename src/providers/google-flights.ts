@@ -5,6 +5,7 @@ import { searchSchema, todayTaipei } from '../validation.js';
 import { getGoogleFlightsUrl, validateGoogleFlightsUrl } from './google-flights-url.js';
 import { googleFlightsPageBarrier, parseGoogleFlightsObservation } from './google-flights-parser.js';
 import { ProviderAccessDeniedError } from './access-denied.js';
+import { NoMatchingItineraryError } from './no-matching-itinerary.js';
 
 export type GoogleFlightsStage = 'navigation' | 'outbound' | 'inbound' | 'booking' | 'seller' | 'parse';
 export interface GoogleFlightsBrowserOptions {
@@ -22,6 +23,13 @@ export function googleFlightsLegHeading(stage: 'outbound' | 'inbound', roundTrip
   return roundTrip ? /^(?:去程|出發)航班$/ : /^(?:(?:去程|出發)航班|所有航班)$/;
 }
 
+const noMatchingItineraryMessage = /^(?:找不到任何結果，但找到替代的建議。?|找不到符合篩選條件的選項)$/;
+export function googleFlightsHasNoMatchingItinerary(text: string): boolean {
+  // Only explicit observed no-result messages qualify. Loading, suggested dates,
+  // and a standalone "try other dates" hint are never evidence of no quote.
+  return text.split(/\r?\n/).some(line => noMatchingItineraryMessage.test(line.trim()));
+}
+
 /** Observe the current document once; waiting for its navigation never makes another request. */
 export async function readGoogleFlightsBody(page: Pick<Page, 'url' | 'waitForLoadState' | 'locator'>,
   remaining: (maximum?: number) => number): Promise<string> {
@@ -37,7 +45,27 @@ export async function readGoogleFlightsBody(page: Pick<Page, 'url' | 'waitForLoa
   checkBarrier();
   const text = await page.locator('body').innerText({ timeout: remaining(10000) });
   checkBarrier(text);
+  if (googleFlightsHasNoMatchingItinerary(text)) throw new NoMatchingItineraryError('google-flights');
   return text;
+}
+
+export async function waitForGoogleFlightsLeg(page: Pick<Page,
+  'getByRole' | 'getByText' | 'waitForURL' | 'url' | 'waitForLoadState' | 'locator'>,
+  stage: 'outbound' | 'inbound', roundTrip: boolean, remaining: (maximum?: number) => number): Promise<void> {
+  const headingReady = page.getByRole('heading', { name: googleFlightsLegHeading(stage, roundTrip) })
+    .waitFor({ state: 'visible', timeout: remaining(30000) });
+  await Promise.race([
+    headingReady,
+    page.waitForURL(url => url.hostname.startsWith('consent.google.') || /\/sorry\b/.test(url.pathname), { timeout: remaining(30000) })
+      .then(() => { throw new ProviderAccessDeniedError('google-flights', new URL(page.url()).hostname, 429); }),
+    page.getByText(noMatchingItineraryMessage).first().waitFor({ state: 'visible', timeout: remaining(30000) })
+      .then(async () => {
+        // Recheck both the document's barrier and explicit message before classifying.
+        // If a transient message disappeared, continue waiting for the original heading.
+        await readGoogleFlightsBody(page, remaining);
+        return headingReady;
+      }),
+  ]);
 }
 
 /** Public, signed-out Google Flights UI; one selected direct Tigerair itinerary. */
@@ -102,12 +130,7 @@ export class GoogleFlightsProvider implements FlightProvider {
       const chooseLeg = async (stage: 'outbound' | 'inbound') => {
         // Observed public UI: each flight option is an accessible link without
         // an href. The stage heading prevents reusing an old outbound option.
-        const heading = page.getByRole('heading', { name: googleFlightsLegHeading(stage, !!input.returnDate) });
-        await Promise.race([
-          heading.waitFor({ state: 'visible', timeout: remaining(30000) }),
-          page.waitForURL(url => url.hostname.startsWith('consent.google.') || /\/sorry\b/.test(url.pathname), { timeout: remaining(30000) })
-            .then(() => { throw new ProviderAccessDeniedError(this.name, new URL(page.url()).hostname, 429); }),
-        ]);
+        await waitForGoogleFlightsLeg(page, stage, !!input.returnDate, remaining);
         await barrier();
         const card = page.getByRole('link', { name: /搭乘(?:台灣|臺灣|台湾)虎航的直達航班.*選擇航班/ }).first();
         await card.waitFor({ state: 'visible', timeout: remaining(20000) });
@@ -139,10 +162,11 @@ export class GoogleFlightsProvider implements FlightProvider {
       })]);
     } catch (error) {
       let failure = error;
-      if (observedPage && !(error instanceof ProviderAccessDeniedError)) {
+      if (observedPage && !(error instanceof ProviderAccessDeniedError) && !(error instanceof NoMatchingItineraryError)) {
         const text = await observedPage.locator('body').innerText({ timeout: 500 }).catch(() => '');
         const blocked = googleFlightsPageBarrier(text, observedPage.url());
         if (blocked) failure = new ProviderAccessDeniedError(this.name, new URL(observedPage.url()).hostname, blocked === 'captcha' ? 429 : 403);
+        else if (googleFlightsHasNoMatchingItinerary(text)) failure = new NoMatchingItineraryError(this.name);
       }
       if (observedPage && this.options.onError) {
         let diagnosticTimer: ReturnType<typeof setTimeout> | undefined;
