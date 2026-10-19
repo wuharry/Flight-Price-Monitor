@@ -17,10 +17,12 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex').slice(0
 const scriptName = `app.${digest(content)}.js`;
 await writeFile(`web-dist/${scriptName}`, content);
 await writeFile('web-dist/app.js', content);
-const guideVersion = digest(await readFile('web/flight-monitor-guide.pdf'));
+const guideRef = process.env.GITHUB_SHA || 'main';
+if (!/^(main|[a-f0-9]{40})$/.test(guideRef)) throw new Error('Invalid website release revision');
+const guideUrl = `https://raw.githubusercontent.com/wuharry/Flight-Price-Monitor/${guideRef}/web/flight-monitor-guide.pdf`;
 const html = (await readFile('web/index.html', 'utf8'))
   .replace('src="./app.js"', `src="./${scriptName}"`)
-  .replace('href="./flight-monitor-guide.pdf"', `href="./flight-monitor-guide.pdf?v=${guideVersion}"`);
+  .replace('href="./flight-monitor-guide.pdf"', `href="${guideUrl}"`);
 await writeFile('web-dist/index.html', html);
 await copyFile('web/style.css', 'web-dist/style.css');
 await copyFile('web/flight-monitor-guide.pdf', 'web-dist/flight-monitor-guide.pdf');
