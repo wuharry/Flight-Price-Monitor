@@ -15,6 +15,31 @@ export interface GoogleFlightsBrowserOptions {
   onError?: (page: Page, stage: GoogleFlightsStage) => Promise<void>;
 }
 
+export function googleFlightsLegHeading(stage: 'outbound' | 'inbound', roundTrip: boolean): RegExp {
+  if (stage === 'inbound') return /^回程航班$/;
+  // Observed single-trip UI labels its initial result set "所有航班".
+  // Round trips must still prove the outbound/inbound stage before selecting.
+  return roundTrip ? /^(?:去程|出發)航班$/ : /^(?:(?:去程|出發)航班|所有航班)$/;
+}
+
+/** Observe the current document once; waiting for its navigation never makes another request. */
+export async function readGoogleFlightsBody(page: Pick<Page, 'url' | 'waitForLoadState' | 'locator'>,
+  remaining: (maximum?: number) => number): Promise<string> {
+  const checkBarrier = (text = '') => {
+    const blocked = googleFlightsPageBarrier(text, page.url());
+    if (blocked) throw new ProviderAccessDeniedError('google-flights', new URL(page.url()).hostname, blocked === 'captcha' ? 429 : 403);
+  };
+  checkBarrier(); // A redirected verification/consent URL must not wait for a body or be reloaded.
+  // A selected permalink can appear before its replacement document has a body.
+  // Wait for that existing navigation and let the locator span a late navigation,
+  // instead of treating a transient missing body as a failed 3-second observation.
+  await page.waitForLoadState('domcontentloaded', { timeout: remaining(10000) });
+  checkBarrier();
+  const text = await page.locator('body').innerText({ timeout: remaining(10000) });
+  checkBarrier(text);
+  return text;
+}
+
 /** Public, signed-out Google Flights UI; one selected direct Tigerair itinerary. */
 export class GoogleFlightsProvider implements FlightProvider {
   readonly name = 'google-flights';
@@ -53,12 +78,7 @@ export class GoogleFlightsProvider implements FlightProvider {
       });
       const response = await page.goto(getGoogleFlightsUrl(input), { waitUntil: 'domcontentloaded', timeout: remaining(45000) });
       if (!response?.ok()) throw new ProviderAccessDeniedError(this.name, 'www.google.com', response?.status() ?? 0);
-      const barrier = async () => {
-        const text = await page.locator('body').innerText({ timeout: remaining(3000) });
-        const blocked = googleFlightsPageBarrier(text, page.url());
-        if (blocked) throw new ProviderAccessDeniedError(this.name, new URL(page.url()).hostname, blocked === 'captcha' ? 429 : 403);
-        return text;
-      };
+      const barrier = () => readGoogleFlightsBody(page, remaining);
       const loadSelectedPermalink = async (previousUrl: string) => {
         // Selecting a flight updates Google's public permalink before its SPA
         // result request finishes. Load that exact, validated public URL once
@@ -82,7 +102,7 @@ export class GoogleFlightsProvider implements FlightProvider {
       const chooseLeg = async (stage: 'outbound' | 'inbound') => {
         // Observed public UI: each flight option is an accessible link without
         // an href. The stage heading prevents reusing an old outbound option.
-        const heading = page.getByRole('heading', { name: stage === 'outbound' ? /^(?:去程|出發)航班$/ : /^回程航班$/ });
+        const heading = page.getByRole('heading', { name: googleFlightsLegHeading(stage, !!input.returnDate) });
         await Promise.race([
           heading.waitFor({ state: 'visible', timeout: remaining(30000) }),
           page.waitForURL(url => url.hostname.startsWith('consent.google.') || /\/sorry\b/.test(url.pathname), { timeout: remaining(30000) })
