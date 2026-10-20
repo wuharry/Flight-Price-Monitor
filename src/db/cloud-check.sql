@@ -48,7 +48,7 @@ declare
   v_email text;
   v_job public.cloud_check_jobs;
   v_today timestamptz := date_trunc('day', now() at time zone 'Asia/Taipei') at time zone 'Asia/Taipei';
-  -- The current Taipei day plus its preceding 30 days, avoiding cron jitter at 09:00.
+  -- The current Taipei day plus its preceding 30 days, avoiding cron jitter at a round start.
   v_window timestamptz := (((now() at time zone 'Asia/Taipei')::date - 30)::timestamp at time zone 'Asia/Taipei');
   v_day_count integer;
   v_month_count integer;
@@ -77,12 +77,13 @@ begin
     from public.cloud_check_jobs where created_at >= v_today;
   select count(*) filter (where trigger_source='manual'), count(*) into v_month_count,v_global_month_count
     from public.cloud_check_jobs where created_at >= v_window;
-  if v_day_count >= 2 or v_global_day_count >= 12 then raise exception 'cloud_check_daily_limit'; end if;
-  if v_month_count >= 62 or v_global_month_count >= 372 then raise exception 'cloud_check_monthly_limit'; end if;
+  -- Account-wide caps cover 30 scheduled plus 2 manual attempts a day (992 over the 31 days).
+  if v_day_count >= 2 or v_global_day_count >= 32 then raise exception 'cloud_check_daily_limit'; end if;
+  if v_month_count >= 62 or v_global_month_count >= 992 then raise exception 'cloud_check_monthly_limit'; end if;
   insert into public.cloud_check_jobs(watch_rule_id,user_id,trigger_source) values (p_rule_id,p_user_id,'manual') returning * into v_job;
   return jsonb_build_object('jobId',v_job.id,'status',v_job.status,'expiresAt',v_job.expires_at,
-    'remainingToday',least(1-v_day_count,11-v_global_day_count),
-    'remainingMonth',least(61-v_month_count,371-v_global_month_count));
+    'remainingToday',least(1-v_day_count,31-v_global_day_count),
+    'remainingMonth',least(61-v_month_count,991-v_global_month_count));
 end;
 $$;
 

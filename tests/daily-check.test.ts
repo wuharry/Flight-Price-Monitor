@@ -6,6 +6,8 @@ import { PGlite } from '@electric-sql/pglite';
 
 type Reservation = {status: string; jobId?: string; remainingToday?: number; remainingMonth?: number};
 const emails = ['uncle@example.com','owner@example.com'];
+// UTC time on Nov 2; Taipei is eight hours ahead, so hour 0 is the 08:00 round.
+const nov2 = (hour:number,minute=0,second=0) => new Date(Date.UTC(2026,10,2,hour,minute,second)).toISOString();
 
 async function database() {
   const db = new PGlite();
@@ -43,7 +45,17 @@ async function database() {
     [ruleId,alice,source,status,age,count]);
   const selected = async (r:Reservation) => (await db.query<{watch_rule_id:string}>('select watch_rule_id from cloud_check_jobs where id=$1',[r.jobId])).rows[0].watch_rule_id;
   const count = async () => (await db.query<{n:number}>('select count(*)::integer n from cloud_check_jobs')).rows[0].n;
-  return {db,migrations,alice,bob,unverified,service,asUser,rule,enable,scheduled,manual,finish,seed,selected,count};
+  const at = (time:string) => db.query("select set_config('test.clock',$1,false)",[time]);
+  // Runs a round's five slots, five minutes apart, and returns the rules they selected.
+  const round = async (utcHour:number) => {
+    const picked:string[]=[];
+    for (let minute=0;minute<=20;minute+=5) {
+      await at(nov2(utcHour,minute));
+      const job=await scheduled(); picked.push(await selected(job)); await finish(job.jobId!,'succeeded');
+    }
+    return picked;
+  };
+  return {db,migrations,alice,bob,unverified,service,asUser,rule,enable,scheduled,manual,finish,seed,selected,count,at,round};
 }
 
 test('daily migrations preserve settings and attempts; browser can read only its invitation and cannot enable, reserve or lock',async()=>{
@@ -64,8 +76,9 @@ test('daily migrations preserve settings and attempts; browser can read only its
     assert.equal(await f.count(),1);
     await f.asUser(f.alice);
     const status=(await db.query<{s:Record<string,unknown>}>('select get_cloud_schedule_status() s')).rows[0].s;
-    assert.deepEqual(status,{enabled:false,eligible:true,timeZone:'Asia/Taipei',windowStart:'09:00',windowEnd:'09:20',
-      eveningWindowStart:'21:00',eveningWindowEnd:'21:20',checksPerRulePerDay:2,scheduledDailyLimit:10,manualDailyLimit:2});
+    assert.deepEqual(status,{enabled:false,eligible:true,timeZone:'Asia/Taipei',
+      roundStarts:['08:00','11:00','14:00','17:00','20:00','23:00'],roundMinutes:20,
+      checksPerRulePerDay:6,scheduledDailyLimit:30,manualDailyLimit:2});
     await assert.rejects(db.query('select * from cloud_monitor_settings'),/permission denied/);
     await assert.rejects(db.exec('update cloud_monitor_settings set enabled=true'),/permission denied/);
     await assert.rejects(f.scheduled(),/permission denied/);
@@ -74,7 +87,8 @@ test('daily migrations preserve settings and attempts; browser can read only its
     await assert.rejects(db.query('select release_rule_monitor_lock($1,$2,$3)',[id,f.alice,randomUUID()]),/permission denied/);
     await f.asUser(f.bob);
     assert.equal((await db.query<{s:{eligible:boolean}}>('select get_cloud_schedule_status() s')).rows[0].s.eligible,false);
-    assert.equal((await db.query<{s:{checksPerRulePerDay:number}}>('select get_cloud_schedule_status() s')).rows[0].s.checksPerRulePerDay,1);
+    // An uninvited account sees the default, never a frequency derived from other accounts' rules.
+    assert.equal((await db.query<{s:{checksPerRulePerDay:number}}>('select get_cloud_schedule_status() s')).rows[0].s.checksPerRulePerDay,6);
     await f.asUser(f.unverified);
     assert.equal((await db.query<{s:{eligible:boolean}}>('select get_cloud_schedule_status() s')).rows[0].s.eligible,false);
     await db.exec('reset role; set role anon');
@@ -107,7 +121,7 @@ test('scheduled eligibility intersects runtime and stored invitations and reject
   } finally {await f.db.close();}
 });
 
-test('scheduled selection serves never-attempted then least recently attempted rules and does not retry any same-day source or outcome',async()=>{
+test('scheduled selection serves never-attempted then least recently attempted rules and does not retry any same-round source or outcome',async()=>{
   const f=await database();
   try {
     const oldest=await f.rule(f.alice,{id:'00000000-0000-4000-8000-000000000001'});
@@ -131,86 +145,90 @@ test('scheduled selection serves never-attempted then least recently attempted r
   } finally {await f.db.close();}
 });
 
-test('five eligible rules each get one morning and one evening attempt, with the ten-attempt daily cap unchanged',async()=>{
+test('five eligible rules each get one attempt in all six rounds, filling the thirty-attempt daily cap',async()=>{
   const f=await database();
   try {
     const ids=[];
     for(let i=1;i<=5;i++) ids.push(await f.rule(f.alice,{id:`00000000-0000-4000-8000-00000000000${i}`}));
     await f.service(); await f.enable();
-    await f.db.query("select set_config('test.clock','2026-11-02T01:00:00Z',false)");
-    for(const id of ids) {
-      const job=await f.scheduled(); assert.equal(await f.selected(job),id);
-      await f.finish(job.jobId!,'succeeded');
+    for(const utcHour of [0,3,6,9,12,15]) { // 08:00, 11:00, 14:00, 17:00, 20:00 and 23:00 Taipei.
+      assert.deepEqual(await f.round(utcHour),ids);
+      assert.equal((await f.scheduled()).status,utcHour===15?'daily-limit':'no-eligible-rule');
     }
-    assert.equal((await f.scheduled()).status,'no-eligible-rule');
-    await f.db.query("select set_config('test.clock','2026-11-02T13:00:00Z',false)");
-    for(const id of ids) {
-      const job=await f.scheduled(); assert.equal(await f.selected(job),id);
-      await f.finish(job.jobId!,'succeeded');
-    }
-    assert.equal((await f.scheduled()).status,'daily-limit');
     const counts=(await f.db.query<{watch_rule_id:string;n:number}>(
       'select watch_rule_id,count(*)::integer n from cloud_check_jobs group by watch_rule_id order by watch_rule_id')).rows;
-    assert.deepEqual(counts,ids.map(watch_rule_id=>({watch_rule_id,n:2})));
+    assert.deepEqual(counts,ids.map(watch_rule_id=>({watch_rule_id,n:6})));
   } finally {await f.db.close();}
 });
 
-test('a manual attempt consumes its current round, including failure, and 18:00 Taipei opens the next round',async()=>{
+test('a manual attempt consumes its current round, including failure, and 10:00 Taipei opens the next round',async()=>{
   const f=await database();
   try {
     const id=await f.rule(); await f.service(); await f.enable();
-    await f.db.query("select set_config('test.clock','2026-11-02T09:59:59Z',false)"); // 17:59:59 Taipei.
+    await f.at(nov2(1,59,59)); // 09:59:59 Taipei, still the 08:00 round's period.
     const manual=await f.manual(id); await f.finish(manual.jobId!,'failed');
     assert.equal((await f.scheduled()).status,'no-eligible-rule');
-    await f.db.query("select set_config('test.clock','2026-11-02T10:00:00Z',false)");
-    const evening=await f.scheduled(); assert.equal(await f.selected(evening),id); await f.finish(evening.jobId!,'failed');
+    await f.at(nov2(2)); // 10:00 Taipei opens the 11:00 round's period.
+    const next=await f.scheduled(); assert.equal(await f.selected(next),id); await f.finish(next.jobId!,'failed');
     assert.equal((await f.scheduled()).status,'no-eligible-rule');
     assert.equal(await f.count(),2);
-    await f.db.query("select set_config('test.clock','2026-11-02T16:00:00Z',false)"); // Next Taipei day.
+    await f.at(nov2(16)); // Next Taipei day.
     assert.equal((await f.scheduled()).status,'reserved');
   } finally {await f.db.close();}
 });
 
-test('six globally invited eligible rules receive only one daily attempt even when this worker sees five',async()=>{
+test('round periods open at 10:00, 13:00, 16:00, 19:00, 22:00 and midnight Taipei',async()=>{
+  const f=await database();
+  try {
+    const id=await f.rule(); await f.service(); await f.enable();
+    for(const utcHour of [2,5,8,11,14,16]) {
+      await f.db.exec('delete from cloud_check_jobs');
+      await f.at(nov2(utcHour));
+      await f.seed('manual',1,'1 second',id); // The last second of the previous period.
+      const opened=await f.scheduled(); assert.equal(await f.selected(opened),id); await f.finish(opened.jobId!);
+      await f.at(nov2(utcHour+1,59,59));
+      assert.equal((await f.scheduled()).status,'no-eligible-rule');
+    }
+  } finally {await f.db.close();}
+});
+
+test('more than five rules take turns by least recent attempt; the shown frequency counts every invited eligible rule',async()=>{
   const f=await database();
   try {
     const ids=[];
     for(let i=1;i<=5;i++) ids.push(await f.rule(f.alice,{id:`00000000-0000-4000-8000-00000000000${i}`}));
     const sixth=await f.rule(f.bob,{id:'00000000-0000-4000-8000-000000000006'});
     await f.service(); await f.enable();
-    const manual=await f.manual(ids[0]); await f.finish(manual.jobId!,'failed');
-    for(const id of ids.slice(1)) {
-      const job=await f.scheduled([emails[0]]); assert.equal(await f.selected(job),id); await f.finish(job.jobId!,'succeeded');
-    }
-    await f.asUser(f.alice);
-    assert.equal((await f.db.query<{s:{checksPerRulePerDay:number}}>('select get_cloud_schedule_status() s')).rows[0].s.checksPerRulePerDay,1);
-    await f.service();
-    await f.db.query("select set_config('test.clock','2026-11-02T13:00:00Z',false)");
-    assert.equal((await f.scheduled([emails[0]])).status,'no-eligible-rule');
-    const last=await f.scheduled(); assert.equal(await f.selected(last),sixth); await f.finish(last.jobId!,'failed');
-    assert.equal((await f.scheduled()).status,'no-eligible-rule');
-    // Disabled/legacy/past/unverified/uninvited rules must not keep the five-rule tier at one.
+    assert.deepEqual(await f.round(0),ids);
+    assert.deepEqual(await f.round(3),[sixth,...ids.slice(0,4)]);
+    assert.deepEqual(await f.round(6),[ids[4],sixth,...ids.slice(0,3)]);
+    const checks=async()=>{
+      await f.asUser(f.alice);
+      const n=(await f.db.query<{s:{checksPerRulePerDay:number}}>('select get_cloud_schedule_status() s')).rows[0].s.checksPerRulePerDay;
+      await f.service(); return n;
+    };
+    assert.equal(await checks(),5);
+    // Disabled/legacy/past/unverified/uninvited rules must not lower the five-rule frequency.
     await f.db.query('update watch_rules set enabled=false where id=$1',[sixth]);
     await f.rule(f.alice,{provider:'tigerair'}); await f.rule(f.alice,{dateOffset:-1});
     await f.rule(f.unverified); await f.rule(null);
     const outsider=randomUUID();
     await f.db.exec('reset role');
     await f.db.query('insert into auth.users values($1,$2,now())',[outsider,'outside@example.com']); await f.rule(outsider);
-    await f.asUser(f.alice);
-    assert.equal((await f.db.query<{s:{checksPerRulePerDay:number}}>('select get_cloud_schedule_status() s')).rows[0].s.checksPerRulePerDay,2);
-    await f.service();
-    const secondRound=await f.scheduled(); assert.equal(await f.selected(secondRound),ids[0]);
+    assert.equal(await checks(),6);
   } finally {await f.db.close();}
 });
 
-test('two earlier automatic attempts forbid a third even if retained records predate the current round',async()=>{
+test('six earlier automatic attempts forbid a seventh even if retained records predate the current round',async()=>{
   const f=await database();
   try {
     const id=await f.rule(); await f.service(); await f.enable();
-    await f.db.query("select set_config('test.clock','2026-11-02T13:00:00Z',false)");
-    await f.seed('scheduled',2,'12 hours',id);
+    await f.at(nov2(13)); // 21:00 Taipei.
+    await f.seed('scheduled',5,'12 hours',id);
+    const sixth=await f.scheduled(); assert.equal(await f.selected(sixth),id); await f.finish(sixth.jobId!);
+    await f.at(nov2(15)); // 23:00 Taipei, a new period.
     assert.equal((await f.scheduled()).status,'no-eligible-rule');
-    assert.equal(await f.count(),2);
+    assert.equal(await f.count(),6);
   } finally {await f.db.close();}
 });
 
@@ -264,11 +282,11 @@ test('manual and scheduled jobs may overlap on different rules while a same-rule
   } finally {await f.db.close();}
 });
 
-test('daily quotas reserve ten automatic and two manual attempts without borrowing or refunding failures/deletions',async()=>{
+test('daily quotas reserve thirty automatic and two manual attempts without borrowing or refunding failures/deletions',async()=>{
   const f=await database();
   try {
     const id=await f.rule(); await f.service(); await f.enable();
-    await f.seed('scheduled',10,'5 minutes');
+    await f.seed('scheduled',30,'5 minutes');
     assert.equal((await f.scheduled()).status,'daily-limit');
     const one=await f.manual(id); assert.equal(one.remainingToday,1);
     await f.finish(one.jobId!);
@@ -277,13 +295,13 @@ test('daily quotas reserve ten automatic and two manual attempts without borrowi
     await f.db.exec("update cloud_check_jobs set created_at=now()-interval '3 minutes' where trigger_source='manual'");
     await assert.rejects(f.manual(id),/daily_limit/);
     await f.db.query('delete from watch_rules where id=$1',[id]);
-    assert.equal(await f.count(),12);
+    assert.equal(await f.count(),32);
     assert.equal((await f.scheduled()).status,'daily-limit');
     // Source quota also works in reverse: consuming manual allowance leaves automatic slots.
     await f.db.exec('delete from cloud_check_jobs');
-    const next=await f.rule(); await f.seed('manual',2,'3 minutes'); await f.seed('scheduled',9,'3 minutes');
-    const tenth=await f.scheduled(); assert.equal(await f.selected(tenth),next); assert.equal(tenth.remainingToday,0);
-    await f.finish(tenth.jobId!);
+    const next=await f.rule(); await f.seed('manual',2,'3 minutes'); await f.seed('scheduled',29,'3 minutes');
+    const thirtieth=await f.scheduled(); assert.equal(await f.selected(thirtieth),next); assert.equal(thirtieth.remainingToday,0);
+    await f.finish(thirtieth.jobId!);
     assert.equal((await f.scheduled()).status,'daily-limit');
   } finally {await f.db.close();}
 });
@@ -292,16 +310,16 @@ test('account-wide caps fail closed even when retained legacy records exceed a s
   const f=await database();
   try {
     const id=await f.rule(); await f.service(); await f.enable();
-    await f.seed('manual',12,'3 minutes');
+    await f.seed('manual',32,'3 minutes');
     assert.equal((await f.scheduled()).status,'daily-limit');
     await f.db.exec('delete from cloud_check_jobs');
-    await f.seed('scheduled',12,'3 minutes');
+    await f.seed('scheduled',32,'3 minutes');
     await assert.rejects(f.manual(id),/daily_limit/);
     await f.db.exec('delete from cloud_check_jobs');
-    await f.seed('manual',372,'30 days');
+    await f.seed('manual',992,'30 days');
     assert.equal((await f.scheduled()).status,'monthly-limit');
     await f.db.exec('delete from cloud_check_jobs');
-    await f.seed('scheduled',372,'30 days');
+    await f.seed('scheduled',992,'30 days');
     await assert.rejects(f.manual(id),/monthly_limit/);
   } finally {await f.db.close();}
 });
@@ -314,7 +332,7 @@ test('expired uncertain starts retain their daily attempt and are not retried by
     await f.service(); await f.enable();
     const lost=await f.scheduled(); assert.equal(await f.selected(lost),one);
     await f.db.query("select set_config('test.clock','2026-11-02T04:11:00Z',false)");
-    const next=await f.scheduled(); assert.equal(await f.selected(next),two); assert.equal(next.remainingToday,8);
+    const next=await f.scheduled(); assert.equal(await f.selected(next),two); assert.equal(next.remainingToday,28);
     assert.equal((await f.db.query<{status:string}>('select status from cloud_check_jobs where id=$1',[lost.jobId])).rows[0].status,'expired');
     await assert.rejects(f.db.query('select claim_cloud_check_job($1,$2)',[lost.jobId,'lateActor']),/not_claimable/);
     await f.finish(next.jobId!);
@@ -327,19 +345,19 @@ test('31 Taipei calendar-day caps survive a calendar-month change and retain att
   const f=await database();
   try {
     const id=await f.rule(); await f.service(); await f.enable();
-    await f.seed('scheduled',310,'30 days 12 hours');
+    await f.seed('scheduled',930,'30 days 12 hours');
     assert.equal((await f.scheduled()).status,'monthly-limit');
     const manual=await f.manual(id); assert.equal(manual.remainingMonth,61); await f.finish(manual.jobId!);
     await f.db.exec("update cloud_check_jobs set created_at=now()-interval '30 days 12 hours 1 second' where trigger_source='scheduled'");
     // The manual attempt today makes this rule ineligible even though automatic budget is restored.
     assert.equal((await f.scheduled()).status,'no-eligible-rule');
     await f.db.exec('delete from cloud_check_jobs');
-    await f.seed('manual',62,'30 days'); await f.seed('scheduled',309,'30 days');
+    await f.seed('manual',62,'30 days'); await f.seed('scheduled',929,'30 days');
     await assert.rejects(f.manual(id),/monthly_limit/);
     const automatic=await f.scheduled(); assert.equal(automatic.remainingMonth,0); await f.finish(automatic.jobId!);
     assert.equal((await f.scheduled()).status,'monthly-limit');
     await f.db.exec("update cloud_check_jobs set created_at=now()-interval '31 days 1 second'");
-    const restored=await f.scheduled(); assert.equal(restored.remainingMonth,309);
+    const restored=await f.scheduled(); assert.equal(restored.remainingMonth,929);
   } finally {await f.db.close();}
 });
 
@@ -347,10 +365,10 @@ test('a few seconds of schedule jitter cannot carry a 32nd Taipei day into the 3
   const f=await database();
   try {
     await f.rule(); await f.service(); await f.enable();
-    await f.db.query("select set_config('test.clock','2026-11-02T01:00:20Z',false)");
-    // 31 days ago at 09:00:30 is outside the 31 Taipei dates although younger than 31*24 hours.
+    await f.at(nov2(0,0,20)); // 08:00:20 Taipei.
+    // 31 days ago at 08:00:30 is outside the 31 Taipei dates although younger than 31*24 hours.
     await f.seed('scheduled',10,'30 days 23 hours 59 minutes 50 seconds');
-    await f.seed('scheduled',300,'1 day');
+    await f.seed('scheduled',920,'1 day');
     const today=await f.scheduled(); assert.equal(today.status,'reserved'); assert.equal(today.remainingMonth,9);
   } finally {await f.db.close();}
 });
@@ -359,7 +377,7 @@ test('31 Taipei dates use the same midnight cutoff even when the database sessio
   const f=await database();
   try {
     const manualRule=await f.rule(); await f.rule(); await f.service(); await f.enable();
-    await f.seed('manual',62,'30 days 12 hours'); await f.seed('scheduled',310,'30 days 12 hours');
+    await f.seed('manual',62,'30 days 12 hours'); await f.seed('scheduled',930,'30 days 12 hours');
     // Taipei Nov 2 -> Oct 3 midnight is Oct 2 16:00 UTC, independent of the server session's DST.
     await f.db.exec("set time zone 'America/New_York'");
     await assert.rejects(f.manual(manualRule),/monthly_limit/);
@@ -381,7 +399,7 @@ test('Taipei midnight boundary includes the new local day and resets daily allow
     const after=await f.manual(id); assert.equal(after.remainingToday,1); assert.equal(after.remainingMonth,59);
     await f.finish(after.jobId!);
     await f.db.query("select set_config('test.clock','2026-11-02T16:03:00Z',false)");
-    const tomorrow=await f.scheduled(); assert.equal(tomorrow.status,'reserved'); assert.equal(tomorrow.remainingToday,9);
+    const tomorrow=await f.scheduled(); assert.equal(tomorrow.status,'reserved'); assert.equal(tomorrow.remainingToday,29);
   } finally {await f.db.close();}
 });
 

@@ -358,7 +358,7 @@ function renderScheduleState() {
   $('#schedule-detail').textContent = view.detail;
   $('#active-label').textContent = view.mode === 'enabled' ? '每日查價行程' : '可查價行程';
   $('#dashboard-intro').textContent = view.mode === 'enabled'
-    ? '填行程 → 啟用並儲存 → 等下一輪雲端查價，符合條件時寄信。早晚各一輪，電腦與網頁不必一直開著。'
+    ? '填行程 → 啟用並儲存 → 等下一輪雲端查價，符合條件時寄信。每天固定時段輪流查，電腦與網頁不必一直開著。'
     : '填行程 → 啟用並儲存 → 確認下方排程狀態。也可按「立即查價」先查一次。';
   $('#enabled-help').textContent = view.mode === 'enabled'
     ? `儲存後從下一輪安排，目前每條每天最多 ${view.checksPerRulePerDay} 次；停用後不再開始新查詢`
